@@ -1,0 +1,62 @@
+name:                grakn-client
+version:             0.0.0.1
+synopsis:            GRAKN.ai haskell driver using gRPC-haskell by awakenetworks.
+license:             Apache-2.0
+license-file:        LICENSE
+author:              Fabian Schneider
+maintainer:          faebl.taylor@pm.me
+copyright:           Fabian Schneider
+category:            Network
+build-type:          Simple
+cabal-version:       >=1.10
+
+Flag Debug
+  Description: Adds debug logging.
+  Manual:      True
+  Default:     False
+
+library
+  build-depends:
+    base >=4.8 && <5.0
+    , async
+    , bytestring == 0.10.*
+    , containers >=0.5 && <0.7
+    , deepseq
+    , grpc-haskell
+    , grpc-haskell-core
+    , proto3-suite
+    , proto3-wire
+    , optparse-generic
+    , text
+    , vector
+    , transformers
+    , safe-exceptions
+  exposed-modules:
+    GraknClient
+    --GraknTestServer
+    -- grakn protocol    
+    Answer
+    Concept
+    CoreDatabase
+    CoreService
+    Logic
+    Options
+    Query
+    Session
+    Transaction
+
+  default-language: Haskell2010
+  ghc-options:      -Wall -g 
+  
+  hs-source-dirs:   lib
+
+executable grakn-demo
+  build-depends:
+    base >=4.8 && <5.0
+    , async
+    , grakn-client
+  default-language: Haskell2010
+  ghc-options:      -Wall -g -threaded -rtsopts -with-rtsopts=-N 
+  -- -O2
+  hs-source-dirs:   src
+  main-is:          GraknExample.hs

@@ -1,0 +1,3 @@
+[submodule "gRPC-haskell"]
+	path = gRPC-haskell
+	url = https://github.com/awakesecurity/gRPC-haskell
