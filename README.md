@@ -1,4 +1,4 @@
-# TypeDB-Haskell
+# TypeDB Client for Haskell
 
 This is a TypeDB client implementation for Haskell.
 It uses AwakeSecurity's gRPC library to implement the TypeDB Protocol.
