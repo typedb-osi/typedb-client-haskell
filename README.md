@@ -1,4 +1,4 @@
-# TypeDB Client for Haskell
+# TypeDB Client for Haskell (INCUBATING)
 
 This is a TypeDB client implementation for Haskell.
 It uses AwakeSecurity's gRPC library to implement the TypeDB Protocol.
