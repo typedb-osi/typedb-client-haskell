@@ -1615,7 +1615,7 @@ instance HsJSONPB.ToSchema Transaction_Stream_Req where
 newtype Transaction_Stream_ResPart = Transaction_Stream_ResPart{transaction_Stream_ResPartState
                                                                 ::
                                                                 HsProtobuf.Enumerated
-                                                                  Transaction_Stream_State}
+                                                                  Transaction.Stream_State}
                                      deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
  
 instance HsProtobuf.Named Transaction_Stream_ResPart where

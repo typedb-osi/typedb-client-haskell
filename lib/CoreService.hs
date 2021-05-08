@@ -43,110 +43,115 @@ import qualified CoreDatabase
 import qualified Session
 import qualified Transaction
  
-data GraknCore request
-     response = GraknCore{graknCoreDatabasesContains ::
-                          request 'HsGRPC.Normal
-                            CoreDatabase.CoreDatabaseManager_Contains_Req
-                            CoreDatabase.CoreDatabaseManager_Contains_Res
-                            ->
-                            Hs.IO
-                              (response 'HsGRPC.Normal
-                                 CoreDatabase.CoreDatabaseManager_Contains_Res),
-                          graknCoreDatabasesCreate ::
-                          request 'HsGRPC.Normal CoreDatabase.CoreDatabaseManager_Create_Req
-                            CoreDatabase.CoreDatabaseManager_Create_Res
-                            ->
-                            Hs.IO
-                              (response 'HsGRPC.Normal
-                                 CoreDatabase.CoreDatabaseManager_Create_Res),
-                          graknCoreDatabasesAll ::
-                          request 'HsGRPC.Normal CoreDatabase.CoreDatabaseManager_All_Req
-                            CoreDatabase.CoreDatabaseManager_All_Res
-                            ->
-                            Hs.IO
-                              (response 'HsGRPC.Normal CoreDatabase.CoreDatabaseManager_All_Res),
-                          graknCoreDatabaseSchema ::
-                          request 'HsGRPC.Normal CoreDatabase.CoreDatabase_Schema_Req
-                            CoreDatabase.CoreDatabase_Schema_Res
-                            ->
-                            Hs.IO
-                              (response 'HsGRPC.Normal CoreDatabase.CoreDatabase_Schema_Res),
-                          graknCoreDatabaseDelete ::
-                          request 'HsGRPC.Normal CoreDatabase.CoreDatabase_Delete_Req
-                            CoreDatabase.CoreDatabase_Delete_Res
-                            ->
-                            Hs.IO
-                              (response 'HsGRPC.Normal CoreDatabase.CoreDatabase_Delete_Res),
-                          graknCoreSessionOpen ::
-                          request 'HsGRPC.Normal Session.Session_Open_Req
-                            Session.Session_Open_Res
-                            -> Hs.IO (response 'HsGRPC.Normal Session.Session_Open_Res),
-                          graknCoreSessionClose ::
-                          request 'HsGRPC.Normal Session.Session_Close_Req
-                            Session.Session_Close_Res
-                            -> Hs.IO (response 'HsGRPC.Normal Session.Session_Close_Res),
-                          graknCoreSessionPulse ::
-                          request 'HsGRPC.Normal Session.Session_Pulse_Req
-                            Session.Session_Pulse_Res
-                            -> Hs.IO (response 'HsGRPC.Normal Session.Session_Pulse_Res),
-                          graknCoreTransaction ::
-                          request 'HsGRPC.BiDiStreaming Transaction.Transaction_Client
-                            Transaction.Transaction_Server
-                            ->
-                            Hs.IO
-                              (response 'HsGRPC.BiDiStreaming Transaction.Transaction_Server)}
-              deriving Hs.Generic
+data TypeDB request response = TypeDB{typeDBDatabasesContains ::
+                                      request 'HsGRPC.Normal
+                                        CoreDatabase.CoreDatabaseManager_Contains_Req
+                                        CoreDatabase.CoreDatabaseManager_Contains_Res
+                                        ->
+                                        Hs.IO
+                                          (response 'HsGRPC.Normal
+                                             CoreDatabase.CoreDatabaseManager_Contains_Res),
+                                      typeDBDatabasesCreate ::
+                                      request 'HsGRPC.Normal
+                                        CoreDatabase.CoreDatabaseManager_Create_Req
+                                        CoreDatabase.CoreDatabaseManager_Create_Res
+                                        ->
+                                        Hs.IO
+                                          (response 'HsGRPC.Normal
+                                             CoreDatabase.CoreDatabaseManager_Create_Res),
+                                      typeDBDatabasesAll ::
+                                      request 'HsGRPC.Normal
+                                        CoreDatabase.CoreDatabaseManager_All_Req
+                                        CoreDatabase.CoreDatabaseManager_All_Res
+                                        ->
+                                        Hs.IO
+                                          (response 'HsGRPC.Normal
+                                             CoreDatabase.CoreDatabaseManager_All_Res),
+                                      typeDBDatabaseSchema ::
+                                      request 'HsGRPC.Normal CoreDatabase.CoreDatabase_Schema_Req
+                                        CoreDatabase.CoreDatabase_Schema_Res
+                                        ->
+                                        Hs.IO
+                                          (response 'HsGRPC.Normal
+                                             CoreDatabase.CoreDatabase_Schema_Res),
+                                      typeDBDatabaseDelete ::
+                                      request 'HsGRPC.Normal CoreDatabase.CoreDatabase_Delete_Req
+                                        CoreDatabase.CoreDatabase_Delete_Res
+                                        ->
+                                        Hs.IO
+                                          (response 'HsGRPC.Normal
+                                             CoreDatabase.CoreDatabase_Delete_Res),
+                                      typeDBSessionOpen ::
+                                      request 'HsGRPC.Normal Session.Session_Open_Req
+                                        Session.Session_Open_Res
+                                        -> Hs.IO (response 'HsGRPC.Normal Session.Session_Open_Res),
+                                      typeDBSessionClose ::
+                                      request 'HsGRPC.Normal Session.Session_Close_Req
+                                        Session.Session_Close_Res
+                                        ->
+                                        Hs.IO (response 'HsGRPC.Normal Session.Session_Close_Res),
+                                      typeDBSessionPulse ::
+                                      request 'HsGRPC.Normal Session.Session_Pulse_Req
+                                        Session.Session_Pulse_Res
+                                        ->
+                                        Hs.IO (response 'HsGRPC.Normal Session.Session_Pulse_Res),
+                                      typeDBTransaction ::
+                                      request 'HsGRPC.BiDiStreaming Transaction.Transaction_Client
+                                        Transaction.Transaction_Server
+                                        ->
+                                        Hs.IO
+                                          (response 'HsGRPC.BiDiStreaming
+                                             Transaction.Transaction_Server)}
+                             deriving Hs.Generic
  
-graknCoreServer ::
-                  GraknCore HsGRPC.ServerRequest HsGRPC.ServerResponse ->
-                    HsGRPC.ServiceOptions -> Hs.IO ()
-graknCoreServer
-  GraknCore{graknCoreDatabasesContains = graknCoreDatabasesContains,
-            graknCoreDatabasesCreate = graknCoreDatabasesCreate,
-            graknCoreDatabasesAll = graknCoreDatabasesAll,
-            graknCoreDatabaseSchema = graknCoreDatabaseSchema,
-            graknCoreDatabaseDelete = graknCoreDatabaseDelete,
-            graknCoreSessionOpen = graknCoreSessionOpen,
-            graknCoreSessionClose = graknCoreSessionClose,
-            graknCoreSessionPulse = graknCoreSessionPulse,
-            graknCoreTransaction = graknCoreTransaction}
+typeDBServer ::
+               TypeDB HsGRPC.ServerRequest HsGRPC.ServerResponse ->
+                 HsGRPC.ServiceOptions -> Hs.IO ()
+typeDBServer
+  TypeDB{typeDBDatabasesContains = typeDBDatabasesContains,
+         typeDBDatabasesCreate = typeDBDatabasesCreate,
+         typeDBDatabasesAll = typeDBDatabasesAll,
+         typeDBDatabaseSchema = typeDBDatabaseSchema,
+         typeDBDatabaseDelete = typeDBDatabaseDelete,
+         typeDBSessionOpen = typeDBSessionOpen,
+         typeDBSessionClose = typeDBSessionClose,
+         typeDBSessionPulse = typeDBSessionPulse,
+         typeDBTransaction = typeDBTransaction}
   (ServiceOptions serverHost serverPort useCompression
      userAgentPrefix userAgentSuffix initialMetadata sslConfig logger
      serverMaxReceiveMessageLength)
   = (HsGRPC.serverLoop
        HsGRPC.defaultOptions{HsGRPC.optNormalHandlers =
                                [(HsGRPC.UnaryHandler
-                                   (HsGRPC.MethodName
-                                      "/grakn.protocol.GraknCore/databases_contains")
-                                   (HsGRPC.convertGeneratedServerHandler
-                                      graknCoreDatabasesContains)),
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/databases_contains")
+                                   (HsGRPC.convertGeneratedServerHandler typeDBDatabasesContains)),
                                 (HsGRPC.UnaryHandler
-                                   (HsGRPC.MethodName "/grakn.protocol.GraknCore/databases_create")
-                                   (HsGRPC.convertGeneratedServerHandler graknCoreDatabasesCreate)),
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/databases_create")
+                                   (HsGRPC.convertGeneratedServerHandler typeDBDatabasesCreate)),
                                 (HsGRPC.UnaryHandler
-                                   (HsGRPC.MethodName "/grakn.protocol.GraknCore/databases_all")
-                                   (HsGRPC.convertGeneratedServerHandler graknCoreDatabasesAll)),
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/databases_all")
+                                   (HsGRPC.convertGeneratedServerHandler typeDBDatabasesAll)),
                                 (HsGRPC.UnaryHandler
-                                   (HsGRPC.MethodName "/grakn.protocol.GraknCore/database_schema")
-                                   (HsGRPC.convertGeneratedServerHandler graknCoreDatabaseSchema)),
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/database_schema")
+                                   (HsGRPC.convertGeneratedServerHandler typeDBDatabaseSchema)),
                                 (HsGRPC.UnaryHandler
-                                   (HsGRPC.MethodName "/grakn.protocol.GraknCore/database_delete")
-                                   (HsGRPC.convertGeneratedServerHandler graknCoreDatabaseDelete)),
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/database_delete")
+                                   (HsGRPC.convertGeneratedServerHandler typeDBDatabaseDelete)),
                                 (HsGRPC.UnaryHandler
-                                   (HsGRPC.MethodName "/grakn.protocol.GraknCore/session_open")
-                                   (HsGRPC.convertGeneratedServerHandler graknCoreSessionOpen)),
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/session_open")
+                                   (HsGRPC.convertGeneratedServerHandler typeDBSessionOpen)),
                                 (HsGRPC.UnaryHandler
-                                   (HsGRPC.MethodName "/grakn.protocol.GraknCore/session_close")
-                                   (HsGRPC.convertGeneratedServerHandler graknCoreSessionClose)),
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/session_close")
+                                   (HsGRPC.convertGeneratedServerHandler typeDBSessionClose)),
                                 (HsGRPC.UnaryHandler
-                                   (HsGRPC.MethodName "/grakn.protocol.GraknCore/session_pulse")
-                                   (HsGRPC.convertGeneratedServerHandler graknCoreSessionPulse))],
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/session_pulse")
+                                   (HsGRPC.convertGeneratedServerHandler typeDBSessionPulse))],
                              HsGRPC.optClientStreamHandlers = [],
                              HsGRPC.optServerStreamHandlers = [],
                              HsGRPC.optBiDiStreamHandlers =
                                [(HsGRPC.BiDiStreamHandler
-                                   (HsGRPC.MethodName "/grakn.protocol.GraknCore/transaction")
-                                   (HsGRPC.convertGeneratedServerRWHandler graknCoreTransaction))],
+                                   (HsGRPC.MethodName "/typedb.protocol.TypeDB/transaction")
+                                   (HsGRPC.convertGeneratedServerRWHandler typeDBTransaction))],
                              optServerHost = serverHost, optServerPort = serverPort,
                              optUseCompression = useCompression,
                              optUserAgentPrefix = userAgentPrefix,
@@ -155,44 +160,43 @@ graknCoreServer
                              optLogger = logger,
                              optMaxReceiveMessageLength = serverMaxReceiveMessageLength})
  
-graknCoreClient ::
-                  HsGRPC.Client ->
-                    Hs.IO (GraknCore HsGRPC.ClientRequest HsGRPC.ClientResult)
-graknCoreClient client
-  = (Hs.pure GraknCore) <*>
+typeDBClient ::
+               HsGRPC.Client ->
+                 Hs.IO (TypeDB HsGRPC.ClientRequest HsGRPC.ClientResult)
+typeDBClient client
+  = (Hs.pure TypeDB) <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName
-               "/grakn.protocol.GraknCore/databases_contains")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/databases_contains")))
       <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName "/grakn.protocol.GraknCore/databases_create")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/databases_create")))
       <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName "/grakn.protocol.GraknCore/databases_all")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/databases_all")))
       <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName "/grakn.protocol.GraknCore/database_schema")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/database_schema")))
       <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName "/grakn.protocol.GraknCore/database_delete")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/database_delete")))
       <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName "/grakn.protocol.GraknCore/session_open")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/session_open")))
       <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName "/grakn.protocol.GraknCore/session_close")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/session_close")))
       <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName "/grakn.protocol.GraknCore/session_pulse")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/session_pulse")))
       <*>
       ((Hs.pure (HsGRPC.clientRequest client)) <*>
          (HsGRPC.clientRegisterMethod client
-            (HsGRPC.MethodName "/grakn.protocol.GraknCore/transaction")))
+            (HsGRPC.MethodName "/typedb.protocol.TypeDB/transaction")))

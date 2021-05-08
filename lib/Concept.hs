@@ -4645,7 +4645,7 @@ instance HsJSONPB.ToSchema Relation_GetPlayersByRoleType_Req where
 newtype Relation_GetPlayersByRoleType_ResPart = Relation_GetPlayersByRoleType_ResPart{relation_GetPlayersByRoleType_ResPartRoleTypesWithPlayers
                                                                                       ::
                                                                                       Hs.Vector
-                                                                                        Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer}
+                                                                                        Concept.GetPlayersByRoleType_RoleTypeWithPlayer}
                                                 deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic,
                                                           Hs.NFData)
  
@@ -4665,14 +4665,14 @@ instance HsProtobuf.Message Relation_GetPlayersByRoleType_ResPart
           = (Hs.mconcat
                [(HsProtobuf.encodeMessageField (HsProtobuf.FieldNumber 1)
                    (Hs.coerce
-                      @(Hs.Vector Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer)
-                      @(HsProtobuf.NestedVec Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer)
+                      @(Hs.Vector Concept.GetPlayersByRoleType_RoleTypeWithPlayer)
+                      @(HsProtobuf.NestedVec Concept.GetPlayersByRoleType_RoleTypeWithPlayer)
                       relation_GetPlayersByRoleType_ResPartRoleTypesWithPlayers))])
         decodeMessage _
           = (Hs.pure Relation_GetPlayersByRoleType_ResPart) <*>
               (Hs.coerce
-                 @(_ (HsProtobuf.NestedVec Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer))
-                 @(_ (Hs.Vector Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer))
+                 @(_ (HsProtobuf.NestedVec Concept.GetPlayersByRoleType_RoleTypeWithPlayer))
+                 @(_ (Hs.Vector Concept.GetPlayersByRoleType_RoleTypeWithPlayer))
                  (HsProtobuf.at HsProtobuf.decodeMessageField
                     (HsProtobuf.FieldNumber 1)))
         dotProto _
