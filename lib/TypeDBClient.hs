@@ -7,7 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-} 
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
-module GraknClient where
+module TypeDBClient where
 import Network.GRPC.HighLevel.Generated
 import Proto3.Suite.Types
 import Options
@@ -40,27 +40,27 @@ defaultConfig = ClientConfig { clientServerHost = "localhost"
                              , clientAuthority = Nothing
                              }
 
-data GraknConfig = GraknConfig { clientConfig   :: ClientConfig
-                               , timeoutSeconds :: Int }
+data TypeDBConfig = TypeDBConfig { clientConfig   :: ClientConfig
+                                 , timeoutSeconds :: Int }
 
-defaultGrakn :: GraknConfig 
-defaultGrakn = GraknConfig defaultConfig 3
+defaultTypeDB :: TypeDBConfig 
+defaultTypeDB = TypeDBConfig defaultConfig 3
 
 newtype Keyspace = Keyspace { getKeyspace :: Text }
-newtype GraknSession = GraknSession { getGraknSession :: BS.ByteString }
+newtype TypeDBSession = TypeDBSession { getTypeDBSession :: BS.ByteString }
 
-newtype GraknM m a = GraknM { fromGrakn :: ReaderT GraknConfig m a}
+newtype TypeDBM m a = TypeDBM { fromTypeDB :: ReaderT TypeDBConfig m a}
     deriving (Functor, Applicative, Monad)
 
-newtype GraknError = GraknError { getError :: Text }
+newtype TypeDBError = TypeDBError { getError :: Text }
     deriving (Show)
 
-openSession :: (MonadIO m) => Keyspace -> GraknM m (Either GraknError GraknSession)
+openSession :: (MonadIO m) => Keyspace -> TypeDBM m (Either TypeDBError TypeDBSession)
 openSession keyspace = 
-    graknNormalRequestE
-        graknCoreSessionOpen
+    typeDBNormalRequestE
+        typeDBSessionOpen
         (Session_Open_Req db type' opts)
-        (GraknSession . session_Open_ResSessionId)
+        (TypeDBSession . session_Open_ResSessionId)
     where
         db    = fromStrict $ getKeyspace keyspace
         type' = Enumerated $ Right $ Session_TypeDATA
@@ -76,46 +76,46 @@ openSession keyspace =
 
 
 
-closeSession :: (MonadIO m) => GraknSession -> GraknM m (Either GraknError ())
-closeSession (GraknSession session) = 
-    graknNormalRequestE
-        graknCoreSessionClose
+closeSession :: (MonadIO m) => TypeDBSession -> TypeDBM m (Either TypeDBError ())
+closeSession (TypeDBSession session) = 
+    typeDBNormalRequestE
+        typeDBSessionClose
         (Session_Close_Req session)
         (const ())
 
 
-keyspaceExists :: MonadIO m => Keyspace -> GraknM m (Either GraknError Bool)
+keyspaceExists :: MonadIO m => Keyspace -> TypeDBM m (Either TypeDBError Bool)
 keyspaceExists(Keyspace keyspace) =
-    graknNormalRequestE 
-        graknCoreDatabasesContains 
+    typeDBNormalRequestE 
+        typeDBDatabasesContains 
         (CoreDatabaseManager_Contains_Req $ fromStrict keyspace) 
         coreDatabaseManager_Contains_ResContains
 
-createKeyspace :: MonadIO m => Keyspace -> GraknM m (Either GraknError ())
+createKeyspace :: MonadIO m => Keyspace -> TypeDBM m (Either TypeDBError ())
 createKeyspace (Keyspace keyspace) =
-    graknNormalRequestE
-        graknCoreDatabasesCreate
+    typeDBNormalRequestE
+        typeDBDatabasesCreate
         (CoreDatabaseManager_Create_Req $ fromStrict keyspace)
         (const ())
 
-deleteKeyspace :: MonadIO m => Keyspace -> GraknM m (Either GraknError ())
+deleteKeyspace :: MonadIO m => Keyspace -> TypeDBM m (Either TypeDBError ())
 deleteKeyspace (Keyspace keyspace) =
-    graknNormalRequestE
-        graknCoreDatabaseDelete
+    typeDBNormalRequestE
+        typeDBDatabaseDelete
         (CoreDatabase_Delete_Req $ fromStrict keyspace)
         (const ())
 
-getKeyspaces :: MonadIO m => GraknM m (Either GraknError [Text])
+getKeyspaces :: MonadIO m => TypeDBM m (Either TypeDBError [Text])
 getKeyspaces =
-    graknNormalRequestE
-        graknCoreDatabasesAll
+    typeDBNormalRequestE
+        typeDBDatabasesAll
         CoreDatabaseManager_All_Req
         (map toStrict . toList . coreDatabaseManager_All_ResNames)
 
 
 networkLatency :: GHC.Int.Int32
 networkLatency = 1000
-tryTx :: GraknM IO (Either GraknError (StatusCode, StatusDetails))
+tryTx :: TypeDBM IO (Either TypeDBError (StatusCode, StatusDetails))
 tryTx = performTx $ map ($opts)  
                   $ [ openTx Transaction_TypeREAD Nothing networkLatency
                     , commitTx ]
@@ -176,9 +176,9 @@ tryTx =  do
     --return $ GraknM $ (liftIO @(ReaderT GraknConfig _) $ print "commit fired")
     return $ Right ()-}
 
-performTx :: MonadIO m => [Transaction_Req] ->  GraknM m (Either GraknError (StatusCode, StatusDetails))
-performTx tx = graknBidiRequestE
-                graknCoreTransaction
+performTx :: MonadIO m => [Transaction_Req] ->  TypeDBM m (Either TypeDBError (StatusCode, StatusDetails))
+performTx tx = typeDBBidiRequestE
+                typeDBTransaction
                 (\clientCall meta receive send done -> do 
                     res <- send $ Transaction_Client $ fromList 
                             $ {- map toTransaction -} tx
@@ -197,7 +197,7 @@ data API_ConecptManager = GetThingType { cm_thing_type_label :: Text }
                         | PutAttributeType { cm_put_attribute_type_label :: Text }
                         | PutRelationType { cm_put_relation_type_label :: Text }-} 
 
-data GraknTx   = Open { txO_sessionID :: BS.ByteString
+data TypeDBTx   = Open { txO_sessionID :: BS.ByteString
                       , txO_type :: Transaction_Type
                       , txO_options :: Maybe Options
                       , txO_latency :: Int32 }
@@ -231,22 +231,22 @@ toTransaction a = Transaction_Req "randomTxID" (fromList [])
 -}
 
 
-type Selector req res = GraknCore ClientRequest ClientResult
+type Selector req res = TypeDB ClientRequest ClientResult
                 -> ClientRequest 'Normal req res
                 -> IO (ClientResult 'Normal res)
 
-graknNormalRequestE :: MonadIO m => 
-    Selector req res -> req -> (res -> a) -> GraknM m (Either GraknError a)
-graknNormalRequestE select req convert = GraknM $ do
-    (GraknConfig config timeoutSeconds) <- ask
+typeDBNormalRequestE :: MonadIO m => 
+    Selector req res -> req -> (res -> a) -> TypeDBM m (Either TypeDBError a)
+typeDBNormalRequestE select req convert = TypeDBM $ do
+    (TypeDBConfig config timeoutSeconds) <- ask
     liftIO $ withGRPCClient config $ \client -> do
-        graknFunction <- select <$> graknCoreClient client
-        res <- graknFunction (ClientNormalRequest req timeoutSeconds [])
+        typeDBFunction <- select <$> typeDBClient client
+        res <- typeDBFunction (ClientNormalRequest req timeoutSeconds [])
         case res of
             ClientNormalResponse 
               result 
               _meta1 _meta2 _status _details  -> return $ Right $ convert result
-            ClientErrorResponse err -> return $ Left $ GraknError $ pack $ show err
+            ClientErrorResponse err -> return $ Left $ TypeDBError $ pack $ show err
             --_                       -> return $ Left $ GraknError $ "implementation error"
 
 --  ClientBiDiRequest :: TimeoutSeconds -> MetadataMap ->
@@ -255,7 +255,7 @@ graknNormalRequestE select req convert = GraknM $ do
 --
 --      -> ClientRequest 'BiDiStreaming request response
 
-type BidiSelector req res = GraknCore ClientRequest ClientResult
+type BidiSelector req res = TypeDB ClientRequest ClientResult
                                 -> ClientRequest 'BiDiStreaming req res
                                 -> IO (ClientResult 'BiDiStreaming res)
 type HandlerFunction req res = ClientCall -> MetadataMap
@@ -263,17 +263,17 @@ type HandlerFunction req res = ClientCall -> MetadataMap
                         -> StreamSend req
                         -> WritesDone -> IO ()
                         
-graknBidiRequestE :: MonadIO m => 
-    BidiSelector req res -> HandlerFunction req res -> GraknM m (Either GraknError (StatusCode, StatusDetails))
-graknBidiRequestE select handler = GraknM $ do
-    (GraknConfig config timeoutSeconds) <- ask
+typeDBBidiRequestE :: MonadIO m => 
+    BidiSelector req res -> HandlerFunction req res -> TypeDBM m (Either TypeDBError (StatusCode, StatusDetails))
+typeDBBidiRequestE select handler = TypeDBM $ do
+    (TypeDBConfig config timeoutSeconds) <- ask
     liftIO $ withGRPCClient config $ \client -> do
-        graknFunction <- select <$> graknCoreClient client
-        res <- graknFunction (ClientBiDiRequest timeoutSeconds [] handler)
+        typeDBFunction <- select <$> typeDBClient client
+        res <- typeDBFunction (ClientBiDiRequest timeoutSeconds [] handler)
         case res of
             ClientBiDiResponse _meta _status _detail
                                     -> return $ Right $ (_status, _detail)
-            ClientErrorResponse err -> return $ Left $ GraknError $ pack $ show err
+            ClientErrorResponse err -> return $ Left $ TypeDBError $ pack $ show err
             --_                       -> return $ Left $ GraknError $ "implementation error"
 
 
@@ -302,10 +302,10 @@ class (Monad m) => GraknClient m where
 
 
 -- safer combinator-style
-runWith :: MonadIO m => GraknM m a -> GraknConfig -> m a
-runWith g config = runReaderT (fromGrakn g) config
+runWith :: MonadIO m => TypeDBM m a -> TypeDBConfig -> m a
+runWith g config = runReaderT (fromTypeDB g) config
 
-withSession :: (MonadIO m) => Keyspace -> GraknM m a -> GraknM m (Either GraknError a)
+withSession :: (MonadIO m) => Keyspace -> TypeDBM m a -> TypeDBM m (Either TypeDBError a)
 withSession keyspace m = do
     sess <- openSession keyspace
     case sess of

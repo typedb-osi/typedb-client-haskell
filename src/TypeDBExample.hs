@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
-import GraknClient
---import GraknTestServer
+import TypeDBClient
+
 import Control.Concurrent (threadDelay, forkIO, killThread)
 
 main :: IO ()
@@ -18,6 +18,6 @@ main = do
     --print res
     
     res <- runWith (withSession (Keyspace "test")
-                        tryTx) defaultGrakn
+                        tryTx) defaultTypeDB
     print res
     return ()

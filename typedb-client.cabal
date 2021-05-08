@@ -1,6 +1,6 @@
-name:                grakn-client
+name:                typedb-client
 version:             0.0.0.1
-synopsis:            GRAKN.ai haskell driver using gRPC-haskell by awakenetworks.
+synopsis:            TypeDB haskell driver using gRPC-haskell by awakenetworks.
 license:             Apache-2.0
 license-file:        LICENSE
 author:              Fabian Schneider
@@ -32,9 +32,8 @@ library
     , transformers
     , safe-exceptions
   exposed-modules:
-    GraknClient
-    --GraknTestServer
-    -- grakn protocol    
+    TypeDBClient
+    -- TypeDB protocol    
     Answer
     Concept
     CoreDatabase
@@ -50,13 +49,13 @@ library
   
   hs-source-dirs:   lib
 
-executable grakn-demo
+executable typedb-demo
   build-depends:
     base >=4.8 && <5.0
     , async
-    , grakn-client
+    , typedb-client
   default-language: Haskell2010
   ghc-options:      -Wall -g -threaded -rtsopts -with-rtsopts=-N 
   -- -O2
   hs-source-dirs:   src
-  main-is:          GraknExample.hs
+  main-is:          TypeDBExample.hs
