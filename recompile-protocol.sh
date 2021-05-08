@@ -21,10 +21,7 @@ for e in $protoFiles; do
 
 done
 
-# now compile all proto files
-protoFiles=$(find ./lib/fixedProtobuf/ -name "*.proto" \
-           | grep -v "cluster")
-
+# now compile and patch all proto files
 for e in ./lib/fixedProtobuf/*.proto; do
     echo "compiling $e"
     # compile proto file
@@ -32,4 +29,14 @@ for e in ./lib/fixedProtobuf/*.proto; do
         --includeDir $(dirname $e)      \
         --proto $(basename $e)          \
         --out ./lib/
+    
+
+    newFile=$(ls -t ./lib/*.hs | head -1)
+    protoFileName=$(basename $newFile | cut -f 1 -d '.')
+    if [ -f ./lib/patches/$protoFileName.patch ]; then
+        echo "found $protoFileName.patch"
+        patch $newFile < ./lib/patches/$protoFileName.patch
+    fi
 done
+
+echo "Finished recompilation and patching"

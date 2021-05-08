@@ -1,0 +1,37 @@
+--- Concept.hs	2021-05-08 10:48:32.812379707 +0200
++++ Concept.patched.hs	2021-05-08 11:19:53.308953702 +0200
+@@ -4645,7 +4645,7 @@
+ newtype Relation_GetPlayersByRoleType_ResPart = Relation_GetPlayersByRoleType_ResPart{relation_GetPlayersByRoleType_ResPartRoleTypesWithPlayers
+                                                                                       ::
+                                                                                       Hs.Vector
+-                                                                                        Concept.GetPlayersByRoleType_RoleTypeWithPlayer}
++                                                                                        Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer}
+                                                 deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic,
+                                                           Hs.NFData)
+  
+@@ -4665,14 +4665,14 @@
+           = (Hs.mconcat
+                [(HsProtobuf.encodeMessageField (HsProtobuf.FieldNumber 1)
+                    (Hs.coerce
+-                      @(Hs.Vector Concept.GetPlayersByRoleType_RoleTypeWithPlayer)
+-                      @(HsProtobuf.NestedVec Concept.GetPlayersByRoleType_RoleTypeWithPlayer)
++                      @(Hs.Vector Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer)
++                      @(HsProtobuf.NestedVec Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer)
+                       relation_GetPlayersByRoleType_ResPartRoleTypesWithPlayers))])
+         decodeMessage _
+           = (Hs.pure Relation_GetPlayersByRoleType_ResPart) <*>
+               (Hs.coerce
+-                 @(_ (HsProtobuf.NestedVec Concept.GetPlayersByRoleType_RoleTypeWithPlayer))
+-                 @(_ (Hs.Vector Concept.GetPlayersByRoleType_RoleTypeWithPlayer))
++                 @(_ (HsProtobuf.NestedVec Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer))
++                 @(_ (Hs.Vector Concept.Relation_GetPlayersByRoleType_RoleTypeWithPlayer))
+                  (HsProtobuf.at HsProtobuf.decodeMessageField
+                     (HsProtobuf.FieldNumber 1)))
+         dotProto _
+@@ -13012,4 +13012,4 @@
+                                                    HsJSONPB._schemaProperties =
+                                                      HsJSONPB.insOrdFromList
+                                                        [("things",
+-                                                         attributeType_GetInstances_ResPartThings)]}})
+\ No newline at end of file
++                                                         attributeType_GetInstances_ResPartThings)]}})

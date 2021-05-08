@@ -1,0 +1,18 @@
+--- Transaction.hs	2021-05-08 11:32:02.658198356 +0200
++++ Transaction.patch.hs	2021-05-08 11:32:59.136637643 +0200
+@@ -1615,7 +1615,7 @@
+ newtype Transaction_Stream_ResPart = Transaction_Stream_ResPart{transaction_Stream_ResPartState
+                                                                 ::
+                                                                 HsProtobuf.Enumerated
+-                                                                  Transaction.Stream_State}
++                                                                  Transaction.Transaction_Stream_State}
+                                      deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
+  
+ instance HsProtobuf.Named Transaction_Stream_ResPart where
+@@ -1921,4 +1921,4 @@
+                                                      Hs.mempty{HsJSONPB._paramSchemaType =
+                                                                  Hs.Just HsJSONPB.SwaggerObject},
+                                                    HsJSONPB._schemaProperties =
+-                                                     HsJSONPB.insOrdFromList []}})
+\ No newline at end of file
++                                                     HsJSONPB.insOrdFromList []}})
