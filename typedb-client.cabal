@@ -31,6 +31,8 @@ library
     , vector
     , transformers
     , safe-exceptions
+    , exceptions
+    , concurrency
   exposed-modules:
     TypeDBClient
     -- TypeDB protocol    

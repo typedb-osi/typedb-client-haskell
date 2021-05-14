@@ -4,9 +4,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-} 
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-} 
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE DeriveAnyClass #-}
 module TypeDBClient where
 import Network.GRPC.HighLevel.Generated
 import Proto3.Suite.Types
@@ -20,9 +24,14 @@ import Transaction
 import CoreService
 import Data.Text (Text, pack, unpack)
 import Data.Text.Lazy (toStrict, fromStrict)
-import Control.Monad (void)
+import Control.Applicative
+import Control.Monad (void, MonadPlus(..))
 import Control.Monad.IO.Class
-import Control.Concurrent
+import Control.Concurrent hiding (threadDelay, throwTo, ThreadId)
+import Control.Monad.Conc.Class
+import Control.Monad.Catch
+import Control.Monad.STM.Class
+import Control.Exception.Base hiding (throwTo)
 import qualified Data.ByteString as BS
 import Control.Monad.Trans.Reader
 import Network.GRPC.LowLevel.Op
@@ -39,18 +48,27 @@ defaultConfig = ClientConfig { clientServerHost = "localhost"
                              , clientSSLConfig = Nothing
                              , clientAuthority = Nothing
                              }
-
-data TypeDBConfig = TypeDBConfig { clientConfig   :: ClientConfig
-                                 , timeoutSeconds :: Int }
-
 defaultTypeDB :: TypeDBConfig 
 defaultTypeDB = TypeDBConfig defaultConfig 3
 
 newtype Keyspace = Keyspace { getKeyspace :: Text }
 newtype TypeDBSession = TypeDBSession { getTypeDBSession :: BS.ByteString }
 
+
+data TypeDBConfig = TypeDBConfig { clientConfig   :: ClientConfig
+                                 , timeoutSeconds :: Int }
+
 newtype TypeDBM m a = TypeDBM { fromTypeDB :: ReaderT TypeDBConfig m a}
     deriving (Functor, Applicative, Monad)
+
+deriving instance MonadThrow m => MonadThrow (TypeDBM m)
+deriving instance MonadCatch m => MonadCatch (TypeDBM m)
+deriving instance MonadMask  m => MonadMask  (TypeDBM m)
+
+deriving instance MonadConc m => MonadConc (TypeDBM m)
+
+
+
 
 newtype TypeDBError = TypeDBError { getError :: Text }
     deriving (Show)
@@ -74,7 +92,12 @@ openSession keyspace =
                                , optionsSchemaLockAcquireTimeoutOpt = Nothing
                                , optionsReadAnyReplicaOpt = Nothing } 
 
-
+pulseSession :: (MonadIO m) => TypeDBSession -> TypeDBM m (Either TypeDBError ())
+pulseSession (TypeDBSession session) =
+    typeDBNormalRequestE
+        typeDBSessionPulse
+        (Session_Pulse_Req session)
+        (const ())
 
 closeSession :: (MonadIO m) => TypeDBSession -> TypeDBM m (Either TypeDBError ())
 closeSession (TypeDBSession session) = 
@@ -82,6 +105,16 @@ closeSession (TypeDBSession session) =
         typeDBSessionClose
         (Session_Close_Req session)
         (const ())
+                              {-
+
+data RuntimeState = RS { rt_threads :: Map FullyQualifiedName ThreadId
+                       , rt_port_cell_mapping 
+                                    :: Map FullyQualifiedName CellID
+                       , rt_cells   :: Map CellID [TVarID]
+                       , rt_tvars   :: Map TVarID (TVar SomeType)
+                       , rt_prim    :: PRIM
+                       }
+                                 -}
 
 
 keyspaceExists :: MonadIO m => Keyspace -> TypeDBM m (Either TypeDBError Bool)
@@ -115,6 +148,7 @@ getKeyspaces =
 
 networkLatency :: GHC.Int.Int32
 networkLatency = 1000
+
 tryTx :: TypeDBM IO (Either TypeDBError (StatusCode, StatusDetails))
 tryTx = performTx $ map ($opts)  
                   $ [ openTx Transaction_TypeREAD Nothing networkLatency
@@ -305,6 +339,10 @@ class (Monad m) => GraknClient m where
 runWith :: MonadIO m => TypeDBM m a -> TypeDBConfig -> m a
 runWith g config = runReaderT (fromTypeDB g) config
 
+data SessionTimeout = SessionTimeout
+    deriving Show
+instance Exception SessionTimeout
+
 withSession :: (MonadIO m) => Keyspace -> TypeDBM m a -> TypeDBM m (Either TypeDBError a)
 withSession keyspace m = do
     sess <- openSession keyspace
@@ -312,9 +350,24 @@ withSession keyspace m = do
       (Left x) ->
         return $ Left x
       (Right session) -> do
+        config <- ask'
+        pulseThread <- fork $ runWith (sendPulses session) config
         res <- m
         closeSession session
+        throwTo pulseThread SessionTimeout
         return $ Right res
+    where 
+        sendPulses :: (MonadIO m) => TypeDBSession -> TypeDBM m ()
+        sendPulses session = do
+            -- send pulse every 5 seconds after creation
+            threadDelay (5*10^6)
+            pulseSession session
+            sendPulses session
+
+ask' :: (Monad m) => TypeDBM m TypeDBConfig
+ask' = TypeDBM $ do
+            config <- ask
+            return config
 
     {-
 actualClient :: IO ()
