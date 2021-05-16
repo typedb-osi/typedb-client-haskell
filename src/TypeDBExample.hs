@@ -1,23 +1,35 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
+import Types
 import TypeDBClient
+import TypeDBTransaction
+import Control.Monad.Catch
 
-import Control.Concurrent (threadDelay, forkIO, killThread)
+--import Control.Concurrent (threadDelay, forkIO, killThread)
 
 main :: IO ()
 main = do 
-    -- putStrLn "starting server"
-    -- id' <- forkIO runServer
-    -- threadDelay 500
-    -- runClient
-    -- threadDelay 500
-    -- killThread id'
-    --actualClient
-    --runWith tryTx defaultGrakn
-    --res <- runWith (createKeyspace (Keyspace "Test")) defaultGrakn
-    --print res
+    res <- catch 
+              ((do 
+                  recreateTest
+                  res <- withSession (Keyspace ksTest) tryTx
+                  return $ Right res
+              ) `runWith` defaultTypeDB ) 
+              (\(TypeDBError e) -> return $ Left e)
     
-    res <- runWith (withSession (Keyspace "test")
-                        tryTx) defaultTypeDB
     print res
     return ()
+
+    where 
+        ksTest = "test"
+        recreateTest :: TypeDBM IO () 
+        recreateTest = do 
+                    keyspaces <- getKeyspaces
+                    if ksTest `elem` keyspaces
+                       then deleteKeyspace $ Keyspace ksTest
+                       else return ()
+                    createKeyspace $ Keyspace ksTest
+                    withSession (Keyspace ksTest) $ do
+                        return ()
+
+

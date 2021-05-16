@@ -35,6 +35,9 @@ library
     , concurrency
   exposed-modules:
     TypeDBClient
+    TypeDBTransaction
+    Types
+    TypeDB
     -- TypeDB protocol    
     Answer
     Concept
@@ -56,6 +59,8 @@ executable typedb-demo
     base >=4.8 && <5.0
     , async
     , typedb-client
+    , exceptions
+    , text
   default-language: Haskell2010
   ghc-options:      -Wall -g -threaded -rtsopts -with-rtsopts=-N 
   -- -O2
