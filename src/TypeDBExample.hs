@@ -12,7 +12,8 @@ main = do
     res <- catch 
               ((do 
                   recreateTest
-                  res <- withSession (Keyspace ksTest) tryTx
+                  res <- withSession (Keyspace ksTest)
+                            (runTxDefault testTx) 
                   return $ Right res
               ) `runWith` defaultTypeDB ) 
               (\(TypeDBError e) -> return $ Left e)
