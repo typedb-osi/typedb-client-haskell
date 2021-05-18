@@ -33,6 +33,8 @@ library
     , safe-exceptions
     , exceptions
     , concurrency
+    , freer-simple
+    , random
   exposed-modules:
     TypeDBClient
     TypeDBTransaction
