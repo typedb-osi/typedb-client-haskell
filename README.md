@@ -1,3 +1,5 @@
+[![Build](https://github.com/typedb-osi/typedb-client-haskell/actions/workflows/main.yml/badge.svg?branch=master)](https://github.com/typedb-osi/typedb-client-haskell/actions/workflows/main.yml)
+
 # TypeDB Client for Haskell (INCUBATING)
 
 This is a TypeDB client implementation for Haskell.
