@@ -8,7 +8,7 @@ There are three versions planned (all within this package):
   to support strongly typed queries and other operations for a specific Schema
 - High-Level-Client: A nice API for the TypeDB Protocol and most needs.
 - Low-Level-Client: a usable wrapper around the generated gRPC Code.
- 
+  
 ## Building
 This project uses Nix.
 To get a development environment use 
