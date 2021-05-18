@@ -1,6 +1,6 @@
 [submodule "gRPC-haskell"]
 	path = gRPC-haskell
-	url = https://github.com/awakesecurity/gRPC-haskell.git
+	url = git@github.com:haskie-lambda/gRPC-haskell.git
 [submodule "typedb-protocol"]
 	path = lib/protocol
 	url = https://github.com/vaticle/typedb-protocol.git
