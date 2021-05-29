@@ -24,7 +24,7 @@ import qualified Data.Text.Internal.Lazy
 import Types
 import TypeDBClient (performTx, networkLatency)
 import GHC.Exts (fromList, fromString)
-import GHC.Int (Int32)
+import GHC.Int (Int32, Int64)
 
 import Control.Monad.Freer
 import Control.Monad.Freer.State
@@ -45,7 +45,7 @@ data TX a where
     LogicManager :: Sth a -> TX a
     Rule :: Sth a -> TX a
     Type :: Sth a -> TX a
-    Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()
+    TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()
 
 commit :: Member TX a => Eff a ()
 commit = send Commit
@@ -59,10 +59,10 @@ rollback = send Rollback
 -- normal get thing request; NOT A GET QUERY!!
 -- used to get the thing after a query e.g.
 getThing :: Member TX a => ThingID -> Eff a ()
-getThing t = send (Thing t Nothing)
+getThing t = send (TX_Thing t Nothing)
 
 deleteThing :: Member TX a => ThingID -> Eff a ()
-deleteThing t = send $ Thing t $ Just 
+deleteThing t = send $ TX_Thing t $ Just 
               $ Concept.Thing_ReqReqThingDeleteReq
               $ Concept.Thing_Delete_Req
 
@@ -72,6 +72,9 @@ data KeysOnly = KeysOnly | AllKeys
 data IsTypeRoot = RootType | NoRootType
     deriving (Show, Eq)
 
+data IsInferred = IsInferred | NotInferred
+    deriving (Show, Eq)
+
 newtype TypeLabel = TypeLabel { fromTypeLabel :: Text }
     deriving (Show, Eq)
 newtype TypeScope = TypeScope { fromTypeScope :: Text }
@@ -79,7 +82,7 @@ newtype TypeScope = TypeScope { fromTypeScope :: Text }
 
 
 thingHas :: Member TX a => ThingID  -> [ThingType] -> KeysOnly -> Eff a ()
-thingHas t thingTypes keysOnly = send $ Thing t $ Just
+thingHas t thingTypes keysOnly = send $ TX_Thing t $ Just
            $ Concept.Thing_ReqReqThingGetHasReq
            $ Concept.Thing_GetHas_Req 
                 (fromList $ map toConceptThingType thingTypes) 
@@ -106,12 +109,76 @@ toConceptThingType (ThingType
                    (Enumerated $ Right vt) 
                    (isRoot==RootType)
 
+
+data AttributeValue = AV_String Text
+                    | AV_Boolean Bool
+                    | AV_Long Int64
+                    | AV_Double Double
+                    | AV_DateTime Int64
+                    deriving (Show, Eq, Ord)
+
+data Thing = Thing { thingIid :: ThingID
+                   , thingType :: Maybe ThingType
+                   , thingValue :: Maybe AttributeValue
+                   , thingInferred :: IsInferred }
+
+
+thingSet :: Member TX a => ThingID -> Thing -> Eff a ()
+thingSet tid thing = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqThingSetHasReq
+           $ Concept.Thing_SetHas_Req 
+                (Just $ toConceptThing thing)
+
+toConceptThing :: Thing -> Concept.Thing
+toConceptThing (Thing (ThingID id)
+                      thingType
+                      thingVal
+                      isInferred)
+    = Concept.Thing (encodeUtf8 id)
+                    (toConceptThingType <$> thingType)
+                    (toConceptThingVal <$> thingVal)
+                    (isInferred==IsInferred)
+
+toConceptThingVal :: AttributeValue -> Concept.Attribute_Value
+toConceptThingVal (AV_String t) 
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueString (toInternalLazyText t)
+toConceptThingVal (AV_Boolean b) 
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueBoolean b
+toConceptThingVal (AV_Long l)
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueLong l
+toConceptThingVal (AV_Double d) 
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDouble d
+toConceptThingVal (AV_DateTime dt)
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDateTime dt
+
+
+
 toInternalLazyText :: Text -> Data.Text.Internal.Lazy.Text
 toInternalLazyText t = fromString $ unpack t
 
     {-
+--- TODO next
+(concept.Thing_ReqReq
 
+                  | Thing_ReqReqThingSetHasReq Concept.Thing_SetHas_Req
+                  | Thing_ReqReqThingUnsetHasReq Concept.Thing_UnsetHas_Req
+                  | Thing_ReqReqThingGetRelationsReq Concept.Thing_GetRelations_Req
+                  | Thing_ReqReqThingGetPlayingReq Concept.Thing_GetPlaying_Req
+                  | Thing_ReqReqRelationAddPlayerReq Concept.Relation_AddPlayer_Req
+                  | Thing_ReqReqRelationRemovePlayerReq Concept.Relation_RemovePlayer_Req
+                  | Thing_ReqReqRelationGetPlayersReq Concept.Relation_GetPlayers_Req
+                  | Thing_ReqReqRelationGetPlayersByRoleTypeReq Concept.Relation_GetPlayersByRoleType_Req
+                  | Thing_ReqReqRelationGetRelatingReq Concept.Relation_GetRelating_Req
+                  | Thing_ReqReqAttributeGetOwnersReq Concept.Attribute_GetOwners_Req
+                  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
 
+---
+
+data Thing = Thing{thingIid :: Hs.ByteString,
+                   thingType :: Hs.Maybe Concept.Type,
+                   thingValue :: Hs.Maybe Concept.Attribute_Value,
+                   thingInferred :: Hs.Bool}
+           deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
 
 data Type = Type{typeLabel :: Hs.Text, typeScope :: Hs.Text,
                  typeEncoding :: HsProtobuf.Enumerated Concept.Type_Encoding,
@@ -161,7 +228,7 @@ compileTx gen req = reverse . program . snd
     interpret' (Open t o i) = withRandom (openTx_ t o i)
     interpret' (Commit) = withRandom (commitTx_)
     interpret' (Rollback) = withRandom (rollbackTx_)
-    interpret' (Thing a Nothing) = withRandom (thingTx_ a Nothing)
+    interpret' (TX_Thing a Nothing) = withRandom (thingTx_ a Nothing)
 
 runTxDefault :: (MonadIO m, MonadConc m) => TypeDBTX -> TypeDBM m (StatusCode, StatusDetails)
 runTxDefault = flip runTxWith []
