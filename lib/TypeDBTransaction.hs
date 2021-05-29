@@ -23,7 +23,7 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Data.Text.Internal.Lazy
 import Types
 import TypeDBClient (performTx, networkLatency)
-import GHC.Exts (fromList)
+import GHC.Exts (fromList, fromString)
 import GHC.Int (Int32)
 
 import Control.Monad.Freer
@@ -65,12 +65,87 @@ deleteThing :: Member TX a => ThingID -> Eff a ()
 deleteThing t = send $ Thing t $ Just 
               $ Concept.Thing_ReqReqThingDeleteReq
               $ Concept.Thing_Delete_Req
-    
 
+data KeysOnly = KeysOnly | AllKeys
+    deriving (Show, Eq)
+
+data IsTypeRoot = RootType | NoRootType
+    deriving (Show, Eq)
+
+newtype TypeLabel = TypeLabel { fromTypeLabel :: Text }
+    deriving (Show, Eq)
+newtype TypeScope = TypeScope { fromTypeScope :: Text }
+    deriving (Show, Eq)
+
+
+thingHas :: Member TX a => ThingID  -> [ThingType] -> KeysOnly -> Eff a ()
+thingHas t thingTypes keysOnly = send $ Thing t $ Just
+           $ Concept.Thing_ReqReqThingGetHasReq
+           $ Concept.Thing_GetHas_Req 
+                (fromList $ map toConceptThingType thingTypes) 
+                (keysOnly==KeysOnly)
+
+data ThingType = ThingType
+                   { tt_typeLabel :: TypeLabel
+                   , tt_typeScope :: TypeScope
+                   , tt_typeEncoding :: Concept.Type_Encoding
+                   , tt_typeValueType :: Concept.AttributeType_ValueType
+                   , tt_typeRoot :: IsTypeRoot }
+    deriving (Show, Eq)
+
+toConceptThingType :: ThingType -> Concept.Type
+toConceptThingType (ThingType 
+                        (TypeLabel tl) 
+                        (TypeScope ts) 
+                        te
+                        vt
+                        isRoot)
+    = Concept.Type (toInternalLazyText  tl) 
+                   (toInternalLazyText ts) 
+                   (Enumerated $ Right te) 
+                   (Enumerated $ Right vt) 
+                   (isRoot==RootType)
+
+toInternalLazyText :: Text -> Data.Text.Internal.Lazy.Text
+toInternalLazyText t = fromString $ unpack t
+
+    {-
+
+
+
+data Type = Type{typeLabel :: Hs.Text, typeScope :: Hs.Text,
+                 typeEncoding :: HsProtobuf.Enumerated Concept.Type_Encoding,
+                 typeValueType ::
+                 HsProtobuf.Enumerated Concept.AttributeType_ValueType,
+                 typeRoot :: Hs.Bool}
+          deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
+
+data AttributeType_ValueType = AttributeType_ValueTypeOBJECT
+                             | AttributeType_ValueTypeBOOLEAN
+                             | AttributeType_ValueTypeLONG
+                             | AttributeType_ValueTypeDOUBLE
+                             | AttributeType_ValueTypeSTRING
+                             | AttributeType_ValueTypeDATETIME
+                             deriving (Hs.Show, Hs.Eq, Hs.Generic, Hs.NFData)
+
+data Type_Encoding = Type_EncodingTHING_TYPE
+                   | Type_EncodingENTITY_TYPE
+                   | Type_EncodingRELATION_TYPE
+                   | Type_EncodingATTRIBUTE_TYPE
+                   | Type_EncodingROLE_TYPE
+                   deriving (Hs.Show, Hs.Eq, Hs.Generic, Hs.NFData)
+
+data ConceptManager_ReqReq = ConceptManager_ReqReqGetThingTypeReq Concept.ConceptManager_GetThingType_Req
+                           | ConceptManager_ReqReqGetThingReq Concept.ConceptManager_GetThing_Req
+                           | ConceptManager_ReqReqPutEntityTypeReq Concept.ConceptManager_PutEntityType_Req
+                           | ConceptManager_ReqReqPutAttributeTypeReq Concept.ConceptManager_PutAttributeType_Req
+                           | ConceptManager_ReqReqPutRelationTypeReq Concept.ConceptManager_PutRelationType_Req
+                           deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
+-}
 type Opts = [(Data.Text.Internal.Lazy.Text
              ,Data.Text.Internal.Lazy.Text)]
 
-newtype ThingID = TID { fromThingID :: Text }
+newtype ThingID = ThingID { fromThingID :: Text }
 
 fromThingID' :: ThingID -> BS.ByteString
 fromThingID' = encodeUtf8 . fromThingID
@@ -111,8 +186,8 @@ type TypeDBTX = Eff '[TX] ()
 testTx :: TypeDBTX
 testTx = do
     openTx Transaction_TypeREAD Nothing networkLatency
-    getThing (TID "sometid")
-    deleteThing (TID "something")
+    getThing (ThingID "sometid")
+    deleteThing (ThingID "something")
     commit
 
     {-
