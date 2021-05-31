@@ -36,16 +36,16 @@ data Sth a
 type RandomTxIdGen = StdGen
 
 data TX a where
-    Commit :: TX ()
-    Rollback :: TX ()
-    Open :: Transaction_Type -> Maybe Options -> Int32 -> TX ()
+    Commit :: TX ()                                             -- done 
+    Rollback :: TX ()                                           -- done
+    Open :: Transaction_Type -> Maybe Options -> Int32 -> TX () -- done
     Stream :: Sth a -> TX a
     QueryManager :: Sth a -> TX a
     ConceptManager :: Sth a ->TX a
     LogicManager :: Sth a -> TX a
     Rule :: Sth a -> TX a
-    Type :: Sth a -> TX a
-    TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()
+    Type :: TypeLabel -> Scope -> Maybe Concept.Type_ReqReq -> TX ()
+    TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()  -- done
 
 commit :: Member TX a => Eff a ()
 commit = send Commit
@@ -200,6 +200,52 @@ getAttributeOwners tid filter = send $ TX_Thing tid $ Just
     {-
 
 ---
+todo:
+
+data Type_ReqReq = Type_ReqReqTypeDeleteReq Concept.Type_Delete_Req
+                 | Type_ReqReqTypeSetLabelReq Concept.Type_SetLabel_Req
+                 | Type_ReqReqTypeIsAbstractReq Concept.Type_IsAbstract_Req
+                 | Type_ReqReqTypeGetSupertypeReq Concept.Type_GetSupertype_Req
+                 | Type_ReqReqTypeSetSupertypeReq Concept.Type_SetSupertype_Req
+                 | Type_ReqReqTypeGetSupertypesReq Concept.Type_GetSupertypes_Req
+                 | Type_ReqReqTypeGetSubtypesReq Concept.Type_GetSubtypes_Req
+                 | Type_ReqReqRoleTypeGetRelationTypesReq Concept.RoleType_GetRelationTypes_Req
+                 | Type_ReqReqRoleTypeGetPlayersReq Concept.RoleType_GetPlayers_Req
+                 | Type_ReqReqThingTypeGetInstancesReq Concept.ThingType_GetInstances_Req
+                 | Type_ReqReqThingTypeSetAbstractReq Concept.ThingType_SetAbstract_Req
+                 | Type_ReqReqThingTypeUnsetAbstractReq Concept.ThingType_UnsetAbstract_Req
+                 | Type_ReqReqThingTypeGetOwnsReq Concept.ThingType_GetOwns_Req
+                 | Type_ReqReqThingTypeSetOwnsReq Concept.ThingType_SetOwns_Req
+                 | Type_ReqReqThingTypeUnsetOwnsReq Concept.ThingType_UnsetOwns_Req
+                 | Type_ReqReqThingTypeGetPlaysReq Concept.ThingType_GetPlays_Req
+                 | Type_ReqReqThingTypeSetPlaysReq Concept.ThingType_SetPlays_Req
+                 | Type_ReqReqThingTypeUnsetPlaysReq Concept.ThingType_UnsetPlays_Req
+                 | Type_ReqReqEntityTypeCreateReq Concept.EntityType_Create_Req
+                 | Type_ReqReqRelationTypeCreateReq Concept.RelationType_Create_Req
+                 | Type_ReqReqRelationTypeGetRelatesForRoleLabelReq Concept.RelationType_GetRelatesForRoleLabel_Req
+                 | Type_ReqReqRelationTypeGetRelatesReq Concept.RelationType_GetRelates_Req
+                 | Type_ReqReqRelationTypeSetRelatesReq Concept.RelationType_SetRelates_Req
+                 | Type_ReqReqRelationTypeUnsetRelatesReq Concept.RelationType_UnsetRelates_Req
+                 | Type_ReqReqAttributeTypePutReq Concept.AttributeType_Put_Req
+                 | Type_ReqReqAttributeTypeGetReq Concept.AttributeType_Get_Req
+                 | Type_ReqReqAttributeTypeGetRegexReq Concept.AttributeType_GetRegex_Req
+                 | Type_ReqReqAttributeTypeSetRegexReq Concept.AttributeType_SetRegex_Req
+                 | Type_ReqReqAttributeTypeGetOwnersReq Concept.AttributeType_GetOwners_Req
+                 deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
+
+
+
+
+data Transaction_ReqReq =
+                        | Transaction_ReqReqStreamReq Transaction.Transaction_Stream_Req
+                        
+                        
+                        | Transaction_ReqReqQueryManagerReq Query.QueryManager_Req
+                        | Transaction_ReqReqConceptManagerReq Concept.ConceptManager_Req
+                        | Transaction_ReqReqLogicManagerReq Logic.LogicManager_Req
+                        | Transaction_ReqReqRuleReq Logic.Rule_Req
+                        | Transaction_ReqReqTypeReq Concept.Type_Req
+                        
 
 data Thing = Thing{thingIid :: Hs.ByteString,
                    thingType :: Hs.Maybe Concept.Type,
@@ -255,7 +301,8 @@ compileTx gen req = reverse . program . snd
     interpret' (Open t o i) = withRandom (openTx_ t o i)
     interpret' (Commit) = withRandom (commitTx_)
     interpret' (Rollback) = withRandom (rollbackTx_)
-    interpret' (TX_Thing a Nothing) = withRandom (thingTx_ a Nothing)
+    interpret' (TX_Thing a req) = withRandom (thingTx_ a req)
+    interpret' (Type lbl scope req) = withRandom (typeTx_ lbl scope req)
 
 runTxDefault :: (MonadIO m, MonadConc m) => TypeDBTX -> TypeDBM m (StatusCode, StatusDetails)
 runTxDefault = flip runTxWith []
@@ -303,6 +350,16 @@ rollbackTx_ txid opts = toTx txid opts $ Transaction_ReqReqRollbackReq Transacti
 type Metadata = String -> Opts
 thingTx_ :: ThingID -> Maybe Concept.Thing_ReqReq ->  String -> Opts -> Transaction_Req
 thingTx_ tid mthingReq txid opts = toTx txid opts $ Transaction_ReqReqThingReq $ Concept.Thing_Req (fromThingID' tid) mthingReq
+
+newtype Scope = Scope { fromScope :: Text }
+
+typeTx_ :: TypeLabel -> Scope -> Maybe Concept.Type_ReqReq -> String -> Opts -> Transaction_Req 
+typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqTypeReq 
+                  $ Concept.Type_Req 
+                        (toInternalLazyText $ fromTypeLabel label)
+                        (toInternalLazyText $ fromScope scope)
+                        mTypeReq
+                
 
 openTx_ :: Transaction_Type
         -> Maybe Options -> Int32 -> String -> Opts -> Transaction_Req
