@@ -123,12 +123,6 @@ data Thing = Thing { thingIid :: ThingID
                    , thingInferred :: IsInferred }
 
 
-thingSet :: Member TX a => ThingID -> Thing -> Eff a ()
-thingSet tid thing = send $ TX_Thing tid $ Just
-           $ Concept.Thing_ReqReqThingSetHasReq
-           $ Concept.Thing_SetHas_Req 
-                (Just $ toConceptThing thing)
-
 toConceptThing :: Thing -> Concept.Thing
 toConceptThing (Thing (ThingID id)
                       thingType
@@ -139,38 +133,71 @@ toConceptThing (Thing (ThingID id)
                     (toConceptThingVal <$> thingVal)
                     (isInferred==IsInferred)
 
-toConceptThingVal :: AttributeValue -> Concept.Attribute_Value
-toConceptThingVal (AV_String t) 
-  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueString (toInternalLazyText t)
-toConceptThingVal (AV_Boolean b) 
-  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueBoolean b
-toConceptThingVal (AV_Long l)
-  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueLong l
-toConceptThingVal (AV_Double d) 
-  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDouble d
-toConceptThingVal (AV_DateTime dt)
-  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDateTime dt
+thingSet :: Member TX a => ThingID -> Thing -> Eff a ()
+thingSet tid thing = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqThingSetHasReq
+           $ Concept.Thing_SetHas_Req 
+                (Just $ toConceptThing thing)
+
+thingUnset :: Member TX a => ThingID -> Thing -> Eff a ()
+thingUnset tid thing = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqThingUnsetHasReq
+           $ Concept.Thing_UnsetHas_Req 
+                (Just $ toConceptThing thing)
+
+thingGetRelations :: Member TX a => ThingID -> [ThingType] -> Eff a ()
+thingGetRelations tid things = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqThingGetRelationsReq
+           $ Concept.Thing_GetRelations_Req
+                (fromList $ map toConceptThingType things)
+
+thingGetPlaying :: Member TX a => ThingID -> Eff a ()
+thingGetPlaying tid = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqThingGetPlayingReq
+           $ Concept.Thing_GetPlaying_Req 
 
 
+addPlayer :: Member TX a => ThingID -> Maybe ThingType -> Maybe Thing -> Eff a ()
+addPlayer tid thingType thing = send $ TX_Thing tid $ Just
+            $ Concept.Thing_ReqReqRelationAddPlayerReq
+            $ Concept.Relation_AddPlayer_Req 
+                (toConceptThingType <$> thingType)
+                (toConceptThing <$> thing)
 
-toInternalLazyText :: Text -> Data.Text.Internal.Lazy.Text
-toInternalLazyText t = fromString $ unpack t
+removePlayer :: Member TX a => ThingID -> Maybe ThingType -> Maybe Thing -> Eff a ()
+removePlayer tid thingType thing = send $ TX_Thing tid $ Just
+            $ Concept.Thing_ReqReqRelationRemovePlayerReq
+            $ Concept.Relation_RemovePlayer_Req 
+                (toConceptThingType <$> thingType)
+                (toConceptThing <$> thing)
+
+
+getPlayers :: Member TX a => ThingID -> [ThingType] -> Eff a ()
+getPlayers tid roleTypes = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqRelationGetPlayersReq
+           $ Concept.Relation_GetPlayers_Req
+                    (fromList $ map toConceptThingType roleTypes)
+
+getPlayersByRoleType :: Member TX a => ThingID -> Eff a ()
+getPlayersByRoleType tid = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqRelationGetPlayersByRoleTypeReq
+           $ Concept.Relation_GetPlayersByRoleType_Req
+
+getRelating :: Member TX a => ThingID -> Eff a ()
+getRelating tid = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqRelationGetRelatingReq
+           $ Concept.Relation_GetRelating_Req
+
+type AttributeOwnersFilter = ThingType
+
+getAttributeOwners :: Member TX a => ThingID -> Maybe AttributeOwnersFilter -> Eff a ()
+getAttributeOwners tid filter = send $ TX_Thing tid $ Just
+           $ Concept.Thing_ReqReqAttributeGetOwnersReq
+           $ Concept.Attribute_GetOwners_Req
+           $ Concept.Attribute_GetOwners_ReqFilterThingType 
+                    <$> toConceptThingType <$> filter
 
     {-
---- TODO next
-(concept.Thing_ReqReq
-
-                  | Thing_ReqReqThingSetHasReq Concept.Thing_SetHas_Req
-                  | Thing_ReqReqThingUnsetHasReq Concept.Thing_UnsetHas_Req
-                  | Thing_ReqReqThingGetRelationsReq Concept.Thing_GetRelations_Req
-                  | Thing_ReqReqThingGetPlayingReq Concept.Thing_GetPlaying_Req
-                  | Thing_ReqReqRelationAddPlayerReq Concept.Relation_AddPlayer_Req
-                  | Thing_ReqReqRelationRemovePlayerReq Concept.Relation_RemovePlayer_Req
-                  | Thing_ReqReqRelationGetPlayersReq Concept.Relation_GetPlayers_Req
-                  | Thing_ReqReqRelationGetPlayersByRoleTypeReq Concept.Relation_GetPlayersByRoleType_Req
-                  | Thing_ReqReqRelationGetRelatingReq Concept.Relation_GetRelating_Req
-                  | Thing_ReqReqAttributeGetOwnersReq Concept.Attribute_GetOwners_Req
-                  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
 
 ---
 
@@ -285,4 +312,21 @@ openTx_ txType opts lat txid txopts = toTx txid txopts $ Transaction_ReqReqOpenR
             (Enumerated $ Right txType)
             opts
             lat
+
+toConceptThingVal :: AttributeValue -> Concept.Attribute_Value
+toConceptThingVal (AV_String t) 
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueString (toInternalLazyText t)
+toConceptThingVal (AV_Boolean b) 
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueBoolean b
+toConceptThingVal (AV_Long l)
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueLong l
+toConceptThingVal (AV_Double d) 
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDouble d
+toConceptThingVal (AV_DateTime dt)
+  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDateTime dt
+
+
+
+toInternalLazyText :: Text -> Data.Text.Internal.Lazy.Text
+toInternalLazyText t = fromString $ unpack t
 
