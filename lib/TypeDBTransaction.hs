@@ -66,19 +66,6 @@ deleteThing t = send $ TX_Thing t $ Just
               $ Concept.Thing_ReqReqThingDeleteReq
               $ Concept.Thing_Delete_Req
 
-data KeysOnly = KeysOnly | AllKeys
-    deriving (Show, Eq)
-
-data IsTypeRoot = RootType | NoRootType
-    deriving (Show, Eq)
-
-data IsInferred = IsInferred | NotInferred
-    deriving (Show, Eq)
-
-newtype TypeLabel = TypeLabel { fromTypeLabel :: Text }
-    deriving (Show, Eq)
-newtype TypeScope = TypeScope { fromTypeScope :: Text }
-    deriving (Show, Eq)
 
 
 thingHas :: Member TX a => ThingID  -> [ThingType] -> KeysOnly -> Eff a ()
@@ -87,14 +74,6 @@ thingHas t thingTypes keysOnly = send $ TX_Thing t $ Just
            $ Concept.Thing_GetHas_Req 
                 (fromList $ map toConceptThingType thingTypes) 
                 (keysOnly==KeysOnly)
-
-data ThingType = ThingType
-                   { tt_typeLabel :: TypeLabel
-                   , tt_typeScope :: TypeScope
-                   , tt_typeEncoding :: Concept.Type_Encoding
-                   , tt_typeValueType :: Concept.AttributeType_ValueType
-                   , tt_typeRoot :: IsTypeRoot }
-    deriving (Show, Eq)
 
 toConceptThingType :: ThingType -> Concept.Type
 toConceptThingType (ThingType 
@@ -110,17 +89,7 @@ toConceptThingType (ThingType
                    (isRoot==RootType)
 
 
-data AttributeValue = AV_String Text
-                    | AV_Boolean Bool
-                    | AV_Long Int64
-                    | AV_Double Double
-                    | AV_DateTime Int64
-                    deriving (Show, Eq, Ord)
 
-data Thing = Thing { thingIid :: ThingID
-                   , thingType :: Maybe ThingType
-                   , thingValue :: Maybe AttributeValue
-                   , thingInferred :: IsInferred }
 
 
 toConceptThing :: Thing -> Concept.Thing
@@ -242,17 +211,51 @@ getRoleTypePlayers tl ts = send $ Type tl ts $ Just
            $ Concept.Type_ReqReqRoleTypeGetPlayersReq
            $ Concept.RoleType_GetPlayers_Req
 
-    {-
+getInstances :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+getInstances tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeGetInstancesReq
+           $ Concept.ThingType_GetInstances_Req
 
----
+setAbstract :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+setAbstract tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeSetAbstractReq
+           $ Concept.ThingType_SetAbstract_Req
+
+unsetAbstract :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+unsetAbstract tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeUnsetAbstractReq
+           $ Concept.ThingType_UnsetAbstract_Req
+
+getOwns :: Member TX a => TypeLabel -> TypeScope -> Maybe AttributeValueType -> KeysOnly -> Eff a ()
+getOwns tl ts avt keysOnly = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeGetOwnsReq
+           $ Concept.ThingType_GetOwns_Req
+                ((Concept.ThingType_GetOwns_ReqFilterValueType . Enumerated . Right . toConceptAttributeValueType) <$> avt)
+                (keysOnly == KeysOnly)
+
+
+toConceptAttributeValueType :: AttributeValueType -> Concept.AttributeType_ValueType
+toConceptAttributeValueType AVT_Object   = Concept.AttributeType_ValueTypeOBJECT
+toConceptAttributeValueType AVT_Boolean  = Concept.AttributeType_ValueTypeBOOLEAN
+toConceptAttributeValueType AVT_Long     = Concept.AttributeType_ValueTypeLONG
+toConceptAttributeValueType AVT_Double   = Concept.AttributeType_ValueTypeDOUBLE
+toConceptAttributeValueType AVT_String   = Concept.AttributeType_ValueTypeSTRING
+toConceptAttributeValueType AVT_DateTime = Concept.AttributeType_ValueTypeDATETIME
+
+
+setOwns :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Maybe ThingType -> KeysOnly -> Eff a ()
+setOwns tl ts avt t keysOnly = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeSetOwnsReq
+           $ Concept.ThingType_SetOwns_Req
+                (toConceptThingType <$> avt)
+                (Concept.ThingType_SetOwns_ReqOverriddenOverriddenType 
+                    . toConceptThingType <$> t) 
+                (keysOnly == KeysOnly)
+
+{---
 todo:
 
 data Type_ReqReq = 
-                 | Type_ReqReqThingTypeGetInstancesReq Concept.ThingType_GetInstances_Req
-                 | Type_ReqReqThingTypeSetAbstractReq Concept.ThingType_SetAbstract_Req
-                 | Type_ReqReqThingTypeUnsetAbstractReq Concept.ThingType_UnsetAbstract_Req
-                 | Type_ReqReqThingTypeGetOwnsReq Concept.ThingType_GetOwns_Req
-                 | Type_ReqReqThingTypeSetOwnsReq Concept.ThingType_SetOwns_Req
                  | Type_ReqReqThingTypeUnsetOwnsReq Concept.ThingType_UnsetOwns_Req
                  | Type_ReqReqThingTypeGetPlaysReq Concept.ThingType_GetPlays_Req
                  | Type_ReqReqThingTypeSetPlaysReq Concept.ThingType_SetPlays_Req
@@ -319,10 +322,8 @@ data ConceptManager_ReqReq = ConceptManager_ReqReqGetThingTypeReq Concept.Concep
                            | ConceptManager_ReqReqPutRelationTypeReq Concept.ConceptManager_PutRelationType_Req
                            deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
 -}
-type Opts = [(Data.Text.Internal.Lazy.Text
-             ,Data.Text.Internal.Lazy.Text)]
 
-newtype ThingID = ThingID { fromThingID :: Text }
+
 
 fromThingID' :: ThingID -> BS.ByteString
 fromThingID' = encodeUtf8 . fromThingID
@@ -398,7 +399,6 @@ type Metadata = String -> Opts
 thingTx_ :: ThingID -> Maybe Concept.Thing_ReqReq ->  String -> Opts -> Transaction_Req
 thingTx_ tid mthingReq txid opts = toTx txid opts $ Transaction_ReqReqThingReq $ Concept.Thing_Req (fromThingID' tid) mthingReq
 
-newtype Scope = Scope { fromScope :: Text }
 
 typeTx_ :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> String -> Opts -> Transaction_Req 
 typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqTypeReq 

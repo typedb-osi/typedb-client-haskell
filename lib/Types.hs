@@ -13,7 +13,9 @@ import Control.Monad.Conc.Class hiding (throw, catch)
 import Control.Monad.Catch
 import Network.GRPC.LowLevel.Op
 import Network.GRPC.LowLevel.Call
-
+import GHC.Int (Int32, Int64)
+import qualified Concept
+import qualified Data.Text.Internal.Lazy
 
 newtype Keyspace = Keyspace { getKeyspace :: Text }
 newtype TypeDBSession = TypeDBSession { getTypeDBSession :: BS.ByteString }
@@ -37,3 +39,54 @@ type Callback a b = ClientCall
               -> StreamSend b
               -> WritesDone
               -> IO ()
+
+newtype Scope = Scope { fromScope :: Text }
+
+type Opts = [(Data.Text.Internal.Lazy.Text
+             ,Data.Text.Internal.Lazy.Text)]
+newtype ThingID = ThingID { fromThingID :: Text }
+
+data AttributeValue = AV_String Text
+                    | AV_Boolean Bool
+                    | AV_Long Int64
+                    | AV_Double Double
+                    | AV_DateTime Int64
+                    deriving (Show, Eq, Ord)
+
+data AttributeValueType = AVT_Object
+                        | AVT_Boolean
+                        | AVT_Long
+                        | AVT_Double
+                        | AVT_String
+                        | AVT_DateTime
+                        deriving (Show, Eq)
+
+data ThingType = ThingType
+                   { tt_typeLabel :: TypeLabel
+                   , tt_typeScope :: TypeScope
+                   , tt_typeEncoding :: Concept.Type_Encoding
+                   , tt_typeValueType :: Concept.AttributeType_ValueType
+                   , tt_typeRoot :: IsTypeRoot }
+    deriving (Show, Eq)
+
+
+data Thing = Thing { thingIid :: ThingID
+                   , thingType :: Maybe ThingType
+                   , thingValue :: Maybe AttributeValue
+                   , thingInferred :: IsInferred }
+
+
+
+data KeysOnly = KeysOnly | AllKeys
+    deriving (Show, Eq)
+
+data IsTypeRoot = RootType | NoRootType
+    deriving (Show, Eq)
+
+data IsInferred = IsInferred | NotInferred
+    deriving (Show, Eq)
+
+newtype TypeLabel = TypeLabel { fromTypeLabel :: Text }
+    deriving (Show, Eq)
+newtype TypeScope = TypeScope { fromTypeScope :: Text }
+    deriving (Show, Eq)
