@@ -41,7 +41,7 @@ data TX a where
     Open :: Transaction_Type -> Maybe Options -> Int32 -> TX () -- done
     Stream :: Sth a -> TX a
     QueryManager :: Sth a -> TX a
-    ConceptManager :: Sth a ->TX a
+    ConceptManager :: Maybe Concept.ConceptManager_ReqReq -> TX ()
     LogicManager :: Sth a -> TX a
     Rule :: Sth a -> TX a
     Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX ()
@@ -357,10 +357,25 @@ getAttributeTypeOwners tl ts keysOnly = send $ Type tl ts $ Just
            $ Concept.Type_ReqReqAttributeTypeGetOwnersReq
            $ Concept.AttributeType_GetOwners_Req
                 (keysOnly == KeysOnly)
-{---
+
+
+getThingType :: Member TX a => TypeLabel -> Eff a ()
+getThingType tl = send $ ConceptManager $ Just 
+            $ Concept.ConceptManager_ReqReqGetThingTypeReq
+            $ Concept.ConceptManager_GetThingType_Req
+                (toInternalLazyText . fromTypeLabel $ tl)
+
+{--- 
+
 todo:
 
 
+data ConceptManager_ReqReq = ConceptManager_ReqReqGetThingTypeReq Concept.ConceptManager_GetThingType_Req
+                           | ConceptManager_ReqReqGetThingReq Concept.ConceptManager_GetThing_Req
+                           | ConceptManager_ReqReqPutEntityTypeReq Concept.ConceptManager_PutEntityType_Req
+                           | ConceptManager_ReqReqPutAttributeTypeReq Concept.ConceptManager_PutAttributeType_Req
+                           | ConceptManager_ReqReqPutRelationTypeReq Concept.ConceptManager_PutRelationType_Req
+                           deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
 
 
 data Transaction_ReqReq =
@@ -368,10 +383,10 @@ data Transaction_ReqReq =
                         
                         
                         | Transaction_ReqReqQueryManagerReq Query.QueryManager_Req
-                        | Transaction_ReqReqConceptManagerReq Concept.ConceptManager_Req
                         | Transaction_ReqReqLogicManagerReq Logic.LogicManager_Req
                         | Transaction_ReqReqRuleReq Logic.Rule_Req
-                        
+                       
+                    >>>>| Transaction_ReqReqConceptManagerReq Concept.ConceptManager_Req
 
 data Thing = Thing{thingIid :: Hs.ByteString,
                    thingType :: Hs.Maybe Concept.Type,
@@ -427,6 +442,8 @@ compileTx gen req = reverse . program . snd
     interpret' (Rollback) = withRandom (rollbackTx_)
     interpret' (TX_Thing a req) = withRandom (thingTx_ a req)
     interpret' (Type lbl scope req) = withRandom (typeTx_ lbl scope req)
+    interpret' (ConceptManager req) = withRandom (conceptTx_ req)
+    
 
 
 runTxDefault :: (MonadIO m, MonadConc m) => TypeDBTX -> Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
@@ -485,6 +502,9 @@ type Metadata = String -> Opts
 thingTx_ :: ThingID -> Maybe Concept.Thing_ReqReq ->  String -> Opts -> Transaction_Req
 thingTx_ tid mthingReq txid opts = toTx txid opts $ Transaction_ReqReqThingReq $ Concept.Thing_Req (fromThingID' tid) mthingReq
 
+
+conceptTx_ :: Maybe Concept.ConceptManager_ReqReq -> String -> Opts -> Transaction_Req
+conceptTx_ conceptReq txid opts = toTx txid opts $ Transaction_ReqReqConceptManagerReq $ Concept.ConceptManager_Req conceptReq
 
 typeTx_ :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> String -> Opts -> Transaction_Req 
 typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqTypeReq 
