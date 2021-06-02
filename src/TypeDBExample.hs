@@ -13,7 +13,7 @@ main = do
               ((do 
                   recreateTest
                   res <- withSession (Keyspace ksTest)
-                            (runTxDefault testTx) 
+                            (runTxDefault testTx testCallback) 
                   return $ Right res
               ) `runWith` defaultTypeDB ) 
               (\(TypeDBError e) -> return $ Left e)

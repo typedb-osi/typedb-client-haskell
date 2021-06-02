@@ -12,6 +12,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 module TypeDBClient where
 import Network.GRPC.HighLevel.Generated
 import Proto3.Suite.Types
@@ -32,7 +33,8 @@ import Control.Concurrent hiding (threadDelay, throwTo, ThreadId)
 import Control.Monad.Conc.Class hiding (throw, catch) 
 import Control.Monad.Catch
 import Control.Monad.STM.Class
-import Control.Exception.Base hiding (throwTo, catch)
+import Control.Exception.Base hiding (throwTo, catch,try)
+import Control.Exception.Safe (tryDeep)
 import qualified Data.ByteString as BS
 import Control.Monad.Trans.Reader
 import Network.GRPC.LowLevel.Op
@@ -133,15 +135,18 @@ networkLatency = 1000
 
 
                  
-
-performTx :: (MonadIO m, MonadConc m) => [Transaction_Req] ->  TypeDBM m (StatusCode, StatusDetails)
-performTx tx = typeDBBidiRequest
+performTx :: (MonadIO m, MonadConc m) => [Transaction_Req] ->  Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
+performTx tx func = typeDBBidiRequest
                 typeDBTransaction
                 (\clientCall meta receive send done -> do 
-                    res <- send $ Transaction_Client $ fromList 
+                    -- TODO: send_res, res may be error
+                    send_res <- send $ Transaction_Client $ fromList 
                             $ tx
-                    return ()
+                    --res <- unsafeFromRight <$> receive ::IO (Maybe Transaction_Server)
+                    func clientCall meta receive send done
                 )
+    where 
+        unsafeFromRight (Right a) = a
 
 
 
@@ -190,15 +195,17 @@ typeDBBidiRequest select handler = TypeDBM $ do
     (TypeDBConfig config timeoutSeconds) <- ask
     liftIO $ withGRPCClient config $ \client -> do
         typeDBFunction <- select <$> typeDBClient client
-        res <- typeDBFunction (ClientBiDiRequest timeoutSeconds [] handler)
-        case res of
-            ClientBiDiResponse _meta _status _detail
+        resE <- try $ typeDBFunction 
+                    (ClientBiDiRequest timeoutSeconds [] handler) :: IO (Either SomeException (ClientResult 'BiDiStreaming _))
+        case resE of
+          (Right (ClientBiDiResponse _meta _status _detail))
                                     -> return $ (_status, _detail)
-            ClientErrorResponse err -> throw $ TypeDBError $ pack $ show err
+          (Right (ClientErrorResponse err)) -> throw $ TypeDBError $ pack $ show err
+          (Left a) -> throw $ TypeDBError $ pack $ show a
 
-typeDBBidiRequestE :: (MonadIO m, MonadConc m) => 
+unsafetypeDBBidiRequestE :: (MonadIO m, MonadConc m) => 
     BidiSelector req res -> HandlerFunction req res -> TypeDBM m (Either TypeDBError (StatusCode, StatusDetails))
-typeDBBidiRequestE select handler = TypeDBM $ do
+unsafetypeDBBidiRequestE select handler = TypeDBM $ do
     (TypeDBConfig config timeoutSeconds) <- ask
     liftIO $ withGRPCClient config $ \client -> do
         typeDBFunction <- select <$> typeDBClient client

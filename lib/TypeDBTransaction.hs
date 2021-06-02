@@ -44,7 +44,7 @@ data TX a where
     ConceptManager :: Sth a ->TX a
     LogicManager :: Sth a -> TX a
     Rule :: Sth a -> TX a
-    Type :: TypeLabel -> Scope -> Maybe Concept.Type_ReqReq -> TX ()
+    Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX ()
     TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()  -- done
 
 commit :: Member TX a => Eff a ()
@@ -197,20 +197,57 @@ getAttributeOwners tid filter = send $ TX_Thing tid $ Just
            $ Concept.Attribute_GetOwners_ReqFilterThingType 
                     <$> toConceptThingType <$> filter
 
+deleteType :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+deleteType tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqTypeDeleteReq
+           $ Concept.Type_Delete_Req
+
+
+setTypeLabel :: Member TX a => TypeLabel -> TypeScope -> TypeLabel -> Eff a ()
+setTypeLabel tl ts newLabel = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqTypeSetLabelReq
+           $ Concept.Type_SetLabel_Req 
+                (toInternalLazyText $ fromTypeLabel newLabel)
+
+
+isAbstract :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+isAbstract tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqTypeIsAbstractReq
+           $ Concept.Type_IsAbstract_Req
+
+getSupertype :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+getSupertype tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqTypeGetSupertypesReq
+           $ Concept.Type_GetSupertypes_Req
+
+getSupertypes :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+getSupertypes tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqTypeGetSupertypeReq
+           $ Concept.Type_GetSupertype_Req
+
+setSupertype :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Eff a ()
+setSupertype tl ts mt = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqTypeSetSupertypeReq
+           $ Concept.Type_SetSupertype_Req
+                (toConceptThingType <$> mt)
+
+
+getRelationTypes :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+getRelationTypes tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqRoleTypeGetRelationTypesReq
+           $ Concept.RoleType_GetRelationTypes_Req
+
+getRoleTypePlayers :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+getRoleTypePlayers tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqRoleTypeGetPlayersReq
+           $ Concept.RoleType_GetPlayers_Req
+
     {-
 
 ---
 todo:
 
-data Type_ReqReq = Type_ReqReqTypeDeleteReq Concept.Type_Delete_Req
-                 | Type_ReqReqTypeSetLabelReq Concept.Type_SetLabel_Req
-                 | Type_ReqReqTypeIsAbstractReq Concept.Type_IsAbstract_Req
-                 | Type_ReqReqTypeGetSupertypeReq Concept.Type_GetSupertype_Req
-                 | Type_ReqReqTypeSetSupertypeReq Concept.Type_SetSupertype_Req
-                 | Type_ReqReqTypeGetSupertypesReq Concept.Type_GetSupertypes_Req
-                 | Type_ReqReqTypeGetSubtypesReq Concept.Type_GetSubtypes_Req
-                 | Type_ReqReqRoleTypeGetRelationTypesReq Concept.RoleType_GetRelationTypes_Req
-                 | Type_ReqReqRoleTypeGetPlayersReq Concept.RoleType_GetPlayers_Req
+data Type_ReqReq = 
                  | Type_ReqReqThingTypeGetInstancesReq Concept.ThingType_GetInstances_Req
                  | Type_ReqReqThingTypeSetAbstractReq Concept.ThingType_SetAbstract_Req
                  | Type_ReqReqThingTypeUnsetAbstractReq Concept.ThingType_UnsetAbstract_Req
@@ -304,14 +341,17 @@ compileTx gen req = reverse . program . snd
     interpret' (TX_Thing a req) = withRandom (thingTx_ a req)
     interpret' (Type lbl scope req) = withRandom (typeTx_ lbl scope req)
 
-runTxDefault :: (MonadIO m, MonadConc m) => TypeDBTX -> TypeDBM m (StatusCode, StatusDetails)
-runTxDefault = flip runTxWith []
 
-runTxWith :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> TypeDBM m (StatusCode, StatusDetails)
-runTxWith tx opts = do
+runTxDefault :: (MonadIO m, MonadConc m) => TypeDBTX -> Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
+runTxDefault tx callback = runTxWith tx [] callback
+
+
+
+runTxWith :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
+runTxWith tx opts callback = do
     gen <- liftIO $ newStdGen 
     let compiled = compileTx gen tx
-    performTx $ map ($opts) compiled 
+    performTx (map ($opts) compiled) callback
 
 
 withRandom :: (String -> Opts -> Transaction_Req) -> Eff '[State CompilerState] ()
@@ -331,6 +371,13 @@ testTx = do
     deleteThing (ThingID "something")
     commit
 
+testCallback :: Callback Transaction_Server Transaction_Client
+testCallback clientCall meta receive send done = do
+    res <- receive :: IO (Either GRPCIOError (Maybe Transaction_Server))
+    case res of
+      (Right (Just (Transaction_Server (Just (Transaction_ServerServerRes _))))) ->
+          return ()
+      _ -> testCallback clientCall meta receive send done
     {-
     performTx $ map ($opts)  
                   $ [ openTx Transaction_TypeREAD Nothing networkLatency
@@ -353,11 +400,11 @@ thingTx_ tid mthingReq txid opts = toTx txid opts $ Transaction_ReqReqThingReq $
 
 newtype Scope = Scope { fromScope :: Text }
 
-typeTx_ :: TypeLabel -> Scope -> Maybe Concept.Type_ReqReq -> String -> Opts -> Transaction_Req 
+typeTx_ :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> String -> Opts -> Transaction_Req 
 typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqTypeReq 
                   $ Concept.Type_Req 
                         (toInternalLazyText $ fromTypeLabel label)
-                        (toInternalLazyText $ fromScope scope)
+                        (toInternalLazyText $ fromTypeScope scope)
                         mTypeReq
                 
 

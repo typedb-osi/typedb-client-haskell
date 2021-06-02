@@ -11,6 +11,8 @@ import Control.Monad.Trans.Reader
 import Control.Monad.IO.Class
 import Control.Monad.Conc.Class hiding (throw, catch) 
 import Control.Monad.Catch
+import Network.GRPC.LowLevel.Op
+import Network.GRPC.LowLevel.Call
 
 
 newtype Keyspace = Keyspace { getKeyspace :: Text }
@@ -28,3 +30,10 @@ newtype TypeDBM m a = TypeDBM { fromTypeDB :: ReaderT TypeDBConfig m a}
 newtype TypeDBError = TypeDBError { getError :: Text }
     deriving (Show, Exception)
 
+
+type Callback a b = ClientCall
+              -> MetadataMap
+              -> StreamRecv a
+              -> StreamSend b
+              -> WritesDone
+              -> IO ()
