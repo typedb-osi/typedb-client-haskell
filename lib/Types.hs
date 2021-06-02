@@ -88,5 +88,9 @@ data IsInferred = IsInferred | NotInferred
 
 newtype TypeLabel = TypeLabel { fromTypeLabel :: Text }
     deriving (Show, Eq)
+newtype RelationLabel = RelationLabel { fromRelationLabel :: Text }
+    deriving (Show, Eq)
+newtype RoleLabel = RoleLabel { fromRoleLabel :: Text }
+    deriving (Show, Eq)
 newtype TypeScope = TypeScope { fromTypeScope :: Text }
     deriving (Show, Eq)

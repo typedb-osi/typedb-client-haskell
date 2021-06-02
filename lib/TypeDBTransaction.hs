@@ -242,6 +242,13 @@ toConceptAttributeValueType AVT_Double   = Concept.AttributeType_ValueTypeDOUBLE
 toConceptAttributeValueType AVT_String   = Concept.AttributeType_ValueTypeSTRING
 toConceptAttributeValueType AVT_DateTime = Concept.AttributeType_ValueTypeDATETIME
 
+toConceptAttributeValue :: AttributeValue -> Concept.Attribute_Value
+toConceptAttributeValue (AV_String t)   = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueString $ toInternalLazyText t
+toConceptAttributeValue (AV_Boolean b)  = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueBoolean b
+toConceptAttributeValue (AV_Long l)     = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueLong l
+toConceptAttributeValue (AV_Double d)   = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDouble d
+toConceptAttributeValue (AV_DateTime d) = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDateTime d
+
 
 setOwns :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Maybe ThingType -> KeysOnly -> Eff a ()
 setOwns tl ts avt t keysOnly = send $ Type tl ts $ Just
@@ -252,26 +259,106 @@ setOwns tl ts avt t keysOnly = send $ Type tl ts $ Just
                     . toConceptThingType <$> t) 
                 (keysOnly == KeysOnly)
 
+unsetOwns :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Eff a ()
+unsetOwns tl ts tt  = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeUnsetOwnsReq
+           $ Concept.ThingType_UnsetOwns_Req
+                (toConceptThingType <$> tt)
+
+
+getPlays :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+getPlays tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeGetPlaysReq
+           $ Concept.ThingType_GetPlays_Req
+
+
+setPlays :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Maybe ThingType -> Eff a ()
+setPlays tl ts mt mo = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeSetPlaysReq
+           $ Concept.ThingType_SetPlays_Req
+                (toConceptThingType <$> mt)
+                ((Concept.ThingType_SetPlays_ReqOverriddenOverriddenRole 
+                    . toConceptThingType) <$> mo)
+
+
+unsetPlays :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Eff a ()
+unsetPlays tl ts mt = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqThingTypeUnsetPlaysReq
+           $ Concept.ThingType_UnsetPlays_Req
+                (toConceptThingType <$> mt)
+
+
+createEntityType :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+createEntityType tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqEntityTypeCreateReq
+           $ Concept.EntityType_Create_Req
+
+
+
+createRelationType :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+createRelationType tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqRelationTypeCreateReq
+           $ Concept.RelationType_Create_Req
+
+
+getRelatesFor :: Member TX a => TypeLabel -> TypeScope -> RoleLabel -> Eff a ()
+getRelatesFor tl ts rl = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqRelationTypeGetRelatesForRoleLabelReq
+           $ Concept.RelationType_GetRelatesForRoleLabel_Req
+                (toInternalLazyText . fromRoleLabel $ rl)
+
+getRelates :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+getRelates tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqRelationTypeGetRelatesReq
+           $ Concept.RelationType_GetRelates_Req
+
+
+setRelates :: Member TX a => TypeLabel -> TypeScope -> RelationLabel -> Maybe RelationLabel -> Eff a ()
+setRelates tl ts rl mrl = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqRelationTypeSetRelatesReq
+           $ Concept.RelationType_SetRelates_Req
+                (toInternalLazyText . fromRelationLabel $ rl)
+                (Concept.RelationType_SetRelates_ReqOverriddenOverriddenLabel 
+                   . toInternalLazyText . fromRelationLabel <$> mrl)
+
+unsetRelates :: Member TX a => TypeLabel -> TypeScope -> RelationLabel -> Eff a ()
+unsetRelates tl ts rl = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqRelationTypeUnsetRelatesReq
+           $ Concept.RelationType_UnsetRelates_Req
+                (toInternalLazyText . fromRelationLabel $ rl)
+
+
+putAttributeType :: Member TX a => TypeLabel -> TypeScope -> Maybe AttributeValue -> Eff a ()
+putAttributeType tl ts mav = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqAttributeTypePutReq
+           $ Concept.AttributeType_Put_Req
+                (toConceptAttributeValue <$> mav)
+
+getAttributeType :: Member TX a => TypeLabel -> TypeScope -> Maybe AttributeValue -> Eff a ()
+getAttributeType tl ts mav = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqAttributeTypeGetReq
+           $ Concept.AttributeType_Get_Req
+                (toConceptAttributeValue <$> mav)
+                
+getAttributeTypeRegex :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+getAttributeTypeRegex tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqAttributeTypeGetRegexReq
+           $ Concept.AttributeType_GetRegex_Req
+
+
+setAttributeTypeRegex :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
+setAttributeTypeRegex tl ts = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqAttributeTypeGetRegexReq
+           $ Concept.AttributeType_GetRegex_Req
+
+
+getAttributeTypeOwners :: Member TX a => TypeLabel -> TypeScope -> KeysOnly -> Eff a ()
+getAttributeTypeOwners tl ts keysOnly = send $ Type tl ts $ Just
+           $ Concept.Type_ReqReqAttributeTypeGetOwnersReq
+           $ Concept.AttributeType_GetOwners_Req
+                (keysOnly == KeysOnly)
 {---
 todo:
-
-data Type_ReqReq = 
-                 | Type_ReqReqThingTypeUnsetOwnsReq Concept.ThingType_UnsetOwns_Req
-                 | Type_ReqReqThingTypeGetPlaysReq Concept.ThingType_GetPlays_Req
-                 | Type_ReqReqThingTypeSetPlaysReq Concept.ThingType_SetPlays_Req
-                 | Type_ReqReqThingTypeUnsetPlaysReq Concept.ThingType_UnsetPlays_Req
-                 | Type_ReqReqEntityTypeCreateReq Concept.EntityType_Create_Req
-                 | Type_ReqReqRelationTypeCreateReq Concept.RelationType_Create_Req
-                 | Type_ReqReqRelationTypeGetRelatesForRoleLabelReq Concept.RelationType_GetRelatesForRoleLabel_Req
-                 | Type_ReqReqRelationTypeGetRelatesReq Concept.RelationType_GetRelates_Req
-                 | Type_ReqReqRelationTypeSetRelatesReq Concept.RelationType_SetRelates_Req
-                 | Type_ReqReqRelationTypeUnsetRelatesReq Concept.RelationType_UnsetRelates_Req
-                 | Type_ReqReqAttributeTypePutReq Concept.AttributeType_Put_Req
-                 | Type_ReqReqAttributeTypeGetReq Concept.AttributeType_Get_Req
-                 | Type_ReqReqAttributeTypeGetRegexReq Concept.AttributeType_GetRegex_Req
-                 | Type_ReqReqAttributeTypeSetRegexReq Concept.AttributeType_SetRegex_Req
-                 | Type_ReqReqAttributeTypeGetOwnersReq Concept.AttributeType_GetOwners_Req
-                 deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
 
 
 
@@ -284,7 +371,6 @@ data Transaction_ReqReq =
                         | Transaction_ReqReqConceptManagerReq Concept.ConceptManager_Req
                         | Transaction_ReqReqLogicManagerReq Logic.LogicManager_Req
                         | Transaction_ReqReqRuleReq Logic.Rule_Req
-                        | Transaction_ReqReqTypeReq Concept.Type_Req
                         
 
 data Thing = Thing{thingIid :: Hs.ByteString,
