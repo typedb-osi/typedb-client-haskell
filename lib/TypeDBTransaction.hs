@@ -39,12 +39,12 @@ data TX a where
     Commit :: TX ()                                             -- done 
     Rollback :: TX ()                                           -- done
     Open :: Transaction_Type -> Maybe Options -> Int32 -> TX () -- done
-    Stream :: TX ()
+    Stream :: TX ()                                             -- done
     QueryManager :: Sth a -> TX a
     ConceptManager :: Maybe Concept.ConceptManager_ReqReq -> TX () -- done
-    LogicManager :: Sth a -> TX a
-    Rule :: RuleLabel -> Maybe Logic.Rule_ReqReq -> TX ()
-    Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX ()
+    LogicManager :: Maybe Logic.LogicManager_ReqReq -> TX ()
+    Rule :: RuleLabel -> Maybe Logic.Rule_ReqReq -> TX ()           -- done
+    Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX () -- done
     TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()  -- done
 
 commit :: Member TX a => Eff a ()
@@ -413,6 +413,31 @@ setRuleLabel rl lbl = send $ Rule rl $ Just
             $ Logic.Rule_ReqReqRuleSetLabelReq
             $ Logic.Rule_SetLabel_Req
                 (toLogicRuleLabel lbl)
+
+getRule :: Member TX a => RuleLabel -> Eff a ()
+getRule lbl = send $ LogicManager $ Just
+            $ Logic.LogicManager_ReqReqGetRuleReq
+            $ Logic.LogicManager_GetRule_Req
+                (toLogicRuleLabel lbl)
+
+putRule :: Member TX a => RuleLabel -> When -> Then -> Eff a ()
+putRule lbl w t = send $ LogicManager $ Just
+            $ Logic.LogicManager_ReqReqPutRuleReq
+            $ Logic.LogicManager_PutRule_Req
+                (toLogicRuleLabel lbl)
+                (toLogicWhen w)
+                (toLogicThen t)
+
+toLogicWhen :: When -> Data.Text.Internal.Lazy.Text
+toLogicWhen = toInternalLazyText . fromWhen
+
+toLogicThen :: Then -> Data.Text.Internal.Lazy.Text
+toLogicThen = toInternalLazyText . fromThen
+
+getRules :: Member TX a => Eff a ()
+getRules = send $ LogicManager $ Just
+            $ Logic.LogicManager_ReqReqGetRulesReq
+            $ Logic.LogicManager_GetRules_Req
 {--- 
 
 
@@ -422,7 +447,6 @@ todo:
 data Transaction_ReqReq =
                         | Transaction_ReqReqQueryManagerReq Query.QueryManager_Req
                         | Transaction_ReqReqLogicManagerReq Logic.LogicManager_Req
-                        | Transaction_ReqReqRuleReq Logic.Rule_Req
                        
 
 data Thing = Thing{thingIid :: Hs.ByteString,
@@ -482,6 +506,7 @@ compileTx gen req = reverse . program . snd
     interpret' (ConceptManager req) = withRandom (conceptTx_ req)
     interpret' (Stream) = withRandom (moreOrDoneStreamTx_)
     interpret' (Rule lbl req) = withRandom (ruleTx_ lbl req)
+    interpret' (LogicManager req) = withRandom (logicManagerTx_ req)
     
 
 
@@ -544,6 +569,10 @@ type Metadata = String -> Opts
 thingTx_ :: ThingID -> Maybe Concept.Thing_ReqReq ->  String -> Opts -> Transaction_Req
 thingTx_ tid mthingReq txid opts = toTx txid opts $ Transaction_ReqReqThingReq $ Concept.Thing_Req (fromThingID' tid) mthingReq
 
+logicManagerTx_ :: Maybe Logic.LogicManager_ReqReq -> String -> Opts -> Transaction_Req
+logicManagerTx_ logicManagerReq txid opts = toTx txid opts 
+        $ Transaction_ReqReqLogicManagerReq 
+        $ Logic.LogicManager_Req logicManagerReq
 
 conceptTx_ :: Maybe Concept.ConceptManager_ReqReq -> String -> Opts -> Transaction_Req
 conceptTx_ conceptReq txid opts = toTx txid opts $ Transaction_ReqReqConceptManagerReq $ Concept.ConceptManager_Req conceptReq

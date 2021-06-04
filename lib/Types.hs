@@ -96,3 +96,7 @@ newtype RuleLabel = RuleLabel { fromRuleLabel :: Text }
     deriving (Show, Eq)
 newtype TypeScope = TypeScope { fromTypeScope :: Text }
     deriving (Show, Eq)
+newtype When = When { fromWhen :: Text }
+    deriving (Show, Eq)
+newtype Then = Then { fromThen :: Text }
+    deriving (Show, Eq)
