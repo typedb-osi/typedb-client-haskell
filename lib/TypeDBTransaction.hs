@@ -39,9 +39,9 @@ data TX a where
     Commit :: TX ()                                             -- done 
     Rollback :: TX ()                                           -- done
     Open :: Transaction_Type -> Maybe Options -> Int32 -> TX () -- done
-    Stream :: Sth a -> TX a
+    Stream :: TX ()
     QueryManager :: Sth a -> TX a
-    ConceptManager :: Maybe Concept.ConceptManager_ReqReq -> TX ()
+    ConceptManager :: Maybe Concept.ConceptManager_ReqReq -> TX () -- done
     LogicManager :: Sth a -> TX a
     Rule :: Sth a -> TX a
     Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX ()
@@ -50,16 +50,15 @@ data TX a where
 commit :: Member TX a => Eff a ()
 commit = send Commit
 
+getMore :: Member TX a => Eff a ()
+getMore = send Stream
+
+
 openTx :: Member TX a => Transaction_Type -> Maybe Options -> Int32 -> Eff a ()
 openTx t o i = send (Open t o i)
 
 rollback :: Member TX a => Eff a ()
 rollback = send Rollback
-
--- normal get thing request; NOT A GET QUERY!!
--- used to get the thing after a query e.g.
-getThing :: Member TX a => ThingID -> Eff a ()
-getThing t = send (TX_Thing t Nothing)
 
 deleteThing :: Member TX a => ThingID -> Eff a ()
 deleteThing t = send $ TX_Thing t $ Just 
@@ -176,7 +175,10 @@ setTypeLabel :: Member TX a => TypeLabel -> TypeScope -> TypeLabel -> Eff a ()
 setTypeLabel tl ts newLabel = send $ Type tl ts $ Just
            $ Concept.Type_ReqReqTypeSetLabelReq
            $ Concept.Type_SetLabel_Req 
-                (toInternalLazyText $ fromTypeLabel newLabel)
+                (toConceptTypeLabel newLabel)
+
+toConceptTypeLabel :: TypeLabel -> Data.Text.Internal.Lazy.Text
+toConceptTypeLabel = toInternalLazyText . fromTypeLabel
 
 
 isAbstract :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
@@ -363,30 +365,47 @@ getThingType :: Member TX a => TypeLabel -> Eff a ()
 getThingType tl = send $ ConceptManager $ Just 
             $ Concept.ConceptManager_ReqReqGetThingTypeReq
             $ Concept.ConceptManager_GetThingType_Req
-                (toInternalLazyText . fromTypeLabel $ tl)
+                (toConceptTypeLabel tl)
 
+
+getThing :: Member TX a => ThingID -> Eff a ()
+getThing tid = send $ ConceptManager $ Just 
+            $ Concept.ConceptManager_ReqReqGetThingReq
+            $ Concept.ConceptManager_GetThing_Req
+                (toConceptThingID tid)
+
+toConceptThingID :: ThingID -> BS.ByteString
+toConceptThingID = encodeUtf8 . fromThingID
+
+
+conceptPutEntityType :: Member TX a => TypeLabel -> Eff a ()
+conceptPutEntityType tid = send $ ConceptManager $ Just 
+            $ Concept.ConceptManager_ReqReqPutEntityTypeReq
+            $ Concept.ConceptManager_PutEntityType_Req
+                (toConceptTypeLabel tid)
+
+conceptPutAttributeType :: Member TX a => TypeLabel -> AttributeValueType -> Eff a ()
+conceptPutAttributeType tid avt = send $ ConceptManager $ Just 
+            $ Concept.ConceptManager_ReqReqPutAttributeTypeReq
+            $ Concept.ConceptManager_PutAttributeType_Req
+                (toConceptTypeLabel tid)
+                (Enumerated . Right $ toConceptAttributeValueType avt)
+
+conceptPutRelationType :: Member TX a => TypeLabel -> Eff a ()
+conceptPutRelationType tid = send $ ConceptManager $ Just 
+            $ Concept.ConceptManager_ReqReqPutRelationTypeReq
+            $ Concept.ConceptManager_PutRelationType_Req
+                (toConceptTypeLabel tid)
 {--- 
 
 todo:
 
 
-data ConceptManager_ReqReq = ConceptManager_ReqReqGetThingTypeReq Concept.ConceptManager_GetThingType_Req
-                           | ConceptManager_ReqReqGetThingReq Concept.ConceptManager_GetThing_Req
-                           | ConceptManager_ReqReqPutEntityTypeReq Concept.ConceptManager_PutEntityType_Req
-                           | ConceptManager_ReqReqPutAttributeTypeReq Concept.ConceptManager_PutAttributeType_Req
-                           | ConceptManager_ReqReqPutRelationTypeReq Concept.ConceptManager_PutRelationType_Req
-                           deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
-
-
 data Transaction_ReqReq =
-                        | Transaction_ReqReqStreamReq Transaction.Transaction_Stream_Req
-                        
-                        
                         | Transaction_ReqReqQueryManagerReq Query.QueryManager_Req
                         | Transaction_ReqReqLogicManagerReq Logic.LogicManager_Req
                         | Transaction_ReqReqRuleReq Logic.Rule_Req
                        
-                    >>>>| Transaction_ReqReqConceptManagerReq Concept.ConceptManager_Req
 
 data Thing = Thing{thingIid :: Hs.ByteString,
                    thingType :: Hs.Maybe Concept.Type,
@@ -443,6 +462,7 @@ compileTx gen req = reverse . program . snd
     interpret' (TX_Thing a req) = withRandom (thingTx_ a req)
     interpret' (Type lbl scope req) = withRandom (typeTx_ lbl scope req)
     interpret' (ConceptManager req) = withRandom (conceptTx_ req)
+    interpret' (Stream) = withRandom (moreOrDoneStreamTx_)
     
 
 
@@ -491,6 +511,9 @@ testCallback clientCall meta receive send done = do
 
 toTx :: (String -> Opts -> Transaction_ReqReq -> Transaction_Req)
 toTx txid opts a = Transaction_Req (BS.pack txid) (fromList opts) (Just a)
+
+moreOrDoneStreamTx_ :: String -> Opts -> Transaction_Req
+moreOrDoneStreamTx_ txid opts = toTx txid opts $ Transaction_ReqReqStreamReq Transaction_Stream_Req
 
 commitTx_ :: String -> Opts -> Transaction_Req
 commitTx_ txid opts = toTx txid opts $ Transaction_ReqReqCommitReq Transaction_Commit_Req
