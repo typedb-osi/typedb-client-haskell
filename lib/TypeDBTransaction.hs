@@ -40,9 +40,9 @@ data TX a where
     Rollback :: TX ()                                           -- done
     Open :: Transaction_Type -> Maybe Options -> Int32 -> TX () -- done
     Stream :: TX ()                                             -- done
-    QueryManager :: Sth a -> TX a
+    QueryManager :: Maybe Options -> Maybe Query.QueryManager_ReqReq -> TX ()
     ConceptManager :: Maybe Concept.ConceptManager_ReqReq -> TX () -- done
-    LogicManager :: Maybe Logic.LogicManager_ReqReq -> TX ()
+    LogicManager :: Maybe Logic.LogicManager_ReqReq -> TX ()    -- done
     Rule :: RuleLabel -> Maybe Logic.Rule_ReqReq -> TX ()           -- done
     Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX () -- done
     TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()  -- done
@@ -438,15 +438,30 @@ getRules :: Member TX a => Eff a ()
 getRules = send $ LogicManager $ Just
             $ Logic.LogicManager_ReqReqGetRulesReq
             $ Logic.LogicManager_GetRules_Req
+
+
+
+
+
 {--- 
 
+data QueryManager_ReqReq = QueryManager_ReqReqDefineReq Query.QueryManager_Define_Req
+                         | QueryManager_ReqReqUndefineReq Query.QueryManager_Undefine_Req
+                         | QueryManager_ReqReqMatchReq Query.QueryManager_Match_Req
+                         | QueryManager_ReqReqMatchAggregateReq Query.QueryManager_MatchAggregate_Req
+                         | QueryManager_ReqReqMatchGroupReq Query.QueryManager_MatchGroup_Req
+                         | QueryManager_ReqReqMatchGroupAggregateReq Query.QueryManager_MatchGroupAggregate_Req
+                         | QueryManager_ReqReqInsertReq Query.QueryManager_Insert_Req
+                         | QueryManager_ReqReqDeleteReq Query.QueryManager_Delete_Req
+                         | QueryManager_ReqReqUpdateReq Query.QueryManager_Update_Req
+                         | QueryManager_ReqReqExplainReq Query.QueryManager_Explain_Req
+                         deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
 
 todo:
 
 
 data Transaction_ReqReq =
                         | Transaction_ReqReqQueryManagerReq Query.QueryManager_Req
-                        | Transaction_ReqReqLogicManagerReq Logic.LogicManager_Req
                        
 
 data Thing = Thing{thingIid :: Hs.ByteString,
@@ -507,6 +522,7 @@ compileTx gen req = reverse . program . snd
     interpret' (Stream) = withRandom (moreOrDoneStreamTx_)
     interpret' (Rule lbl req) = withRandom (ruleTx_ lbl req)
     interpret' (LogicManager req) = withRandom (logicManagerTx_ req)
+    interpret' (QueryManager opts req) = withRandom (queryManagerTx_ opts req)
     
 
 
@@ -583,6 +599,12 @@ ruleTx_ ruleLabel ruleReq txid opts = toTx txid opts
         (toLogicRuleLabel ruleLabel)
         ruleReq
 
+queryManagerTx_ :: Maybe Options -> Maybe Query.QueryManager_ReqReq -> String -> Opts -> Transaction_Req
+queryManagerTx_ mopts mQReq txid opts = toTx txid opts 
+        $ Transaction_ReqReqQueryManagerReq
+        $ Query.QueryManager_Req 
+            (mopts)
+            (mQReq)
 
 typeTx_ :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> String -> Opts -> Transaction_Req 
 typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqTypeReq 
