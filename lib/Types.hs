@@ -92,5 +92,7 @@ newtype RelationLabel = RelationLabel { fromRelationLabel :: Text }
     deriving (Show, Eq)
 newtype RoleLabel = RoleLabel { fromRoleLabel :: Text }
     deriving (Show, Eq)
+newtype RuleLabel = RuleLabel { fromRuleLabel :: Text }
+    deriving (Show, Eq)
 newtype TypeScope = TypeScope { fromTypeScope :: Text }
     deriving (Show, Eq)

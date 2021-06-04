@@ -43,7 +43,7 @@ data TX a where
     QueryManager :: Sth a -> TX a
     ConceptManager :: Maybe Concept.ConceptManager_ReqReq -> TX () -- done
     LogicManager :: Sth a -> TX a
-    Rule :: Sth a -> TX a
+    Rule :: RuleLabel -> Maybe Logic.Rule_ReqReq -> TX ()
     Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX ()
     TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()  -- done
 
@@ -396,7 +396,25 @@ conceptPutRelationType tid = send $ ConceptManager $ Just
             $ Concept.ConceptManager_ReqReqPutRelationTypeReq
             $ Concept.ConceptManager_PutRelationType_Req
                 (toConceptTypeLabel tid)
+
+
+
+
+toLogicRuleLabel :: RuleLabel -> Data.Text.Internal.Lazy.Text
+toLogicRuleLabel = toInternalLazyText . fromRuleLabel
+
+deleteRule :: Member TX a => RuleLabel -> Eff a ()
+deleteRule rl = send $ Rule rl $ Just
+            $ Logic.Rule_ReqReqRuleDeleteReq
+            $ Logic.Rule_Delete_Req
+
+setRuleLabel :: Member TX a => RuleLabel -> RuleLabel -> Eff a ()
+setRuleLabel rl lbl = send $ Rule rl $ Just
+            $ Logic.Rule_ReqReqRuleSetLabelReq
+            $ Logic.Rule_SetLabel_Req
+                (toLogicRuleLabel lbl)
 {--- 
+
 
 todo:
 
@@ -463,6 +481,7 @@ compileTx gen req = reverse . program . snd
     interpret' (Type lbl scope req) = withRandom (typeTx_ lbl scope req)
     interpret' (ConceptManager req) = withRandom (conceptTx_ req)
     interpret' (Stream) = withRandom (moreOrDoneStreamTx_)
+    interpret' (Rule lbl req) = withRandom (ruleTx_ lbl req)
     
 
 
@@ -528,6 +547,13 @@ thingTx_ tid mthingReq txid opts = toTx txid opts $ Transaction_ReqReqThingReq $
 
 conceptTx_ :: Maybe Concept.ConceptManager_ReqReq -> String -> Opts -> Transaction_Req
 conceptTx_ conceptReq txid opts = toTx txid opts $ Transaction_ReqReqConceptManagerReq $ Concept.ConceptManager_Req conceptReq
+
+ruleTx_ :: RuleLabel -> Maybe Logic.Rule_ReqReq -> String -> Opts -> Transaction_Req
+ruleTx_ ruleLabel ruleReq txid opts = toTx txid opts 
+    $ Transaction_ReqReqRuleReq $ Logic.Rule_Req 
+        (toLogicRuleLabel ruleLabel)
+        ruleReq
+
 
 typeTx_ :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> String -> Opts -> Transaction_Req 
 typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqTypeReq 
