@@ -1,7 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 module TypeQLParser where
-import Language.ANTLR4
     {-
 [g4|
   atom

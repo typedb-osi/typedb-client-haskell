@@ -35,7 +35,8 @@ library
     , concurrency
     , freer-simple
     , random
-    , antlr-haskell
+    , template-haskell
+    , split
   exposed-modules:
     TypeDBClient
     TypeDBTransaction
@@ -53,6 +54,7 @@ library
     Transaction
     TypeQLParser
     TypeDBQuery
+    TypeDBTH
 
   default-language: Haskell2010
   ghc-options:      -Wall -g 
