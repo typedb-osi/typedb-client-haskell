@@ -31,6 +31,7 @@ import Control.Monad.Freer.State
 import System.Random
 import Control.Monad.IO.Class
 import Control.Monad.Conc.Class hiding (throw, catch) 
+import TypeDBQuery
 
 data Sth a
 type RandomTxIdGen = StdGen
@@ -440,12 +441,18 @@ getRules = send $ LogicManager $ Just
             $ Logic.LogicManager_GetRules_Req
 
 
-
+query :: Member TX b => Maybe Options -> Query a -> Eff b ()
+query opts q = case (getQueryType q) of
+            [QT_DEFINE] -> send $ QueryManager opts $ Just 
+                                $ Query.QueryManager_ReqReqDefineReq
+                                $ Query.QueryManager_Define_Req 
+                                $ toInternalLazyText $ compileQuery q
+            ...
 
 
 {--- 
 
-data QueryManager_ReqReq = QueryManager_ReqReqDefineReq Query.QueryManager_Define_Req
+data QueryManager_ReqReq = 
                          | QueryManager_ReqReqUndefineReq Query.QueryManager_Undefine_Req
                          | QueryManager_ReqReqMatchReq Query.QueryManager_Match_Req
                          | QueryManager_ReqReqMatchAggregateReq Query.QueryManager_MatchAggregate_Req

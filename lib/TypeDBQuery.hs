@@ -8,10 +8,13 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE QuasiQuotes #-}
 module TypeDBQuery where
-import Data.Text (Text, pack)
+import Data.Text (Text, pack, unpack, intercalate)
+import qualified Data.Text as T
 import Prelude hiding (String,or,not,sum,max, min)
 import GHC.Exts (IsList(..),IsString(..))
 import TypeDBTH
+import Data.List (sort)
+import qualified Data.Set as Set
 
 data Calculation a = R_LT a
                    | R_GT a
@@ -23,15 +26,19 @@ data Calculation a = R_LT a
 newtype Variable = Var { fromVar :: Text }
 newtype Label = Lbl { fromLbl :: Text }
 
+instance Show Variable where
+    show (Var v) = unpack v
 instance IsString Label where
     fromString = Lbl . pack
+instance IsString Variable where
+    fromString = Var . pack
 
 data RolePlay a b = RP { role :: IsaMember a => Maybe a, player :: IsaMember b => b }
 
-sRP :: IsaMember b => b -> RolePlay Text b
+sRP :: RelationMember b => b -> RolePlay Label b
 sRP b = RP Nothing b
 
-rp :: (IsaMember b) => Text -> b -> RolePlay Text b
+rp :: (RelationMember b) => Label -> b -> RolePlay Label b
 rp a b = RP (Just a) b
 
 newtype Relation a b = Rel { fromRel :: (IsaMember a, IsaMember b) => [RolePlay a b]}
@@ -41,102 +48,384 @@ instance (IsaMember a, IsaMember b) => IsList (Relation a b) where
     fromList = Rel
     toList = fromRel
 
+class RelationMember a where
+instance RelationMember Variable where
+instance RelationMember Label where
+
 
 class IsaMember a where
+    showIsaMember :: a -> Text
 
 instance IsaMember Variable where
-instance IsaMember (Relation a b) where
+    showIsaMember = showVarOrText
+instance (IsaMember a, IsaMember b) => IsaMember (Relation a b) where
+    showIsaMember = showRelation
 instance IsaMember Text where
+    showIsaMember = showVarOrText
+instance IsaMember Label where
+    showIsaMember = showVarOrLabel
 
 class HasMember a where
+    showHasMember :: a -> Text
+    isMemberVar :: a -> Bool
+    isMemberVar = const False
 instance HasMember Variable where
+    showHasMember (Var a) = "$" <> a
+    isMemberVar = const True
 instance HasMember Label where
-instance HasMember (Calculation a) where
+    showHasMember (Lbl a) = a
+instance HasMember Text where
+    showHasMember a = "\"" <> a <> "\""
+
+instance (VarOrLit a) => HasMember (Calculation a) where
+    showHasMember (R_LT a) = "< " <> (showVarOrLit  a)
+    showHasMember (R_GT a) = "> " <> (showVarOrLit a)
+    showHasMember (R_GE a) = ">= " <> (showVarOrLit a)
+    showHasMember (R_LE a) = "<= " <> (showVarOrLit a)
+    showHasMember (R_EQ a) = "= " <> (showVarOrLit a)
+    showHasMember (R_NEQ a) = "!= " <> (showVarOrLit a)
+
 
 class Show a => QShow a where
     qshow :: a -> Text
     qshow = pack . show
 
 instance QShow Text where
+    qshow a = "\"" <> a <> "\""
 instance QShow Bool where
 instance QShow Int where
 instance QShow Double where
+instance QShow Date where
+    qshow (Date y m d) = (pack $ show y)
+                       <> "-"
+                       <> (pack $ show m)
+                       <> "-"
+                       <> (pack $ show d)
+
+data Date = Date Int Int Int
+    deriving Show
 
 class QShowOrCalc a where
-instance QShowOrCalc (Calculation a) where
+    showQShowOrCalc :: a -> Text
+instance VarOrLit a => QShowOrCalc (Calculation a) where
+    showQShowOrCalc = showHasMember
 instance QShowOrCalc Text where
+    showQShowOrCalc = qshow
 instance QShowOrCalc Bool where
+    showQShowOrCalc = qshow
 instance QShowOrCalc Int where
+    showQShowOrCalc = qshow
 instance QShowOrCalc Double where
+    showQShowOrCalc = qshow
+instance QShowOrCalc Date where
+    showQShowOrCalc = qshow
 
 class VarOrLit a where
+    showVarOrLit :: a -> Text
 instance VarOrLit Variable where
+    showVarOrLit (Var a) = "$" <> a
 instance VarOrLit Text where
+    showVarOrLit a = "\"" <> a <> "\""
 instance VarOrLit Bool where
+    showVarOrLit True = pack "true"
+    showVarOrLit False = pack "false"
 instance VarOrLit Int where
+    showVarOrLit = pack . show
 instance VarOrLit Double where
+    showVarOrLit = pack . show
 instance VarOrLit Label where
+    showVarOrLit (Lbl a) = a
 
 class VarOrText a where
+    showVarOrText :: a -> Text
 instance VarOrText Variable where
+    showVarOrText (Var a) = "$" <> a
 instance VarOrText Text where
+    showVarOrText a = "\"" <> a <> "\"" 
+
+class VarOrLabel a where
+    showVarOrLabel :: a -> Text
+    isVar :: a -> Bool
+    isVar = const False
+
+instance VarOrLabel Variable where
+    showVarOrLabel (Var a) = "$" <> a
+    isVar = const True
+instance VarOrLabel Label where
+    showVarOrLabel (Lbl a) = a
 
 data ISA
 data REL
+data SUB
+
+
+startsWithOneOf :: Text -> [Text] -> Bool
+startsWithOneOf a bs = foldr ((||) . startsWith a) False bs
+
+startsWith :: Text -> Text -> Bool
+startsWith a b = T.take (T.length b) a == b
+
+isOneOf :: Text -> [Text] -> Bool
+isOneOf t as = foldr (\x acc -> t==x || acc) False as
+
+removeTrailing :: Text -> Text
+removeTrailing a = applyProps a   
+    where
+        applyProps x = foldr (\(p,c) a -> 
+                            if p a 
+                               then c a
+                               else a)
+                           x props
+        props :: [(Text->Bool, Text->Text)]
+        props = [((`startsWithOneOf` [";",","]),T.drop 1)
+                ,((`startsWithOneOf` ["; ",", "]),T.drop 2)
+                ,((`startsWithOneOf` [" ;"," ,"]) . T.reverse,
+                        T.reverse . T.drop 2 . T.reverse)]
+
+
+compilePattern :: Pattern a -> Text
+compilePattern p = postProcess $ compile p
+  where 
+    postProcess a = T.replace ", ;" ";" 
+                  $ a
+    compile :: Pattern a -> Text
+    compile (EndP) = ""
+    compile (Isa v (Just v') n) = "; "
+                                <> showVarOrLabel v 
+                                <> " isa " <> showVarOrLabel v'
+                                <> compile n
+    compile (Isa v Nothing n)   = " isa " <> showVarOrLabel v 
+                                <> compile n
+    compile (Isa v (Just v') n) = "; " 
+                                <> showVarOrLabel v 
+                                <> " isa " <> showVarOrLabel v'
+                                <> compile n
+    compile (Isa' v Nothing n)  = " isa! " <> showVarOrLabel v 
+                                <> compile n
+    compile (Isa' v (Just v') n)= "; " 
+                                <> showVarOrLabel v 
+                                <> " isa! " <> showVarOrLabel v'
+                                <> compile n
+    compile (Has v m n)         = (if isVar v then "; " else ", has ")
+                                <> showVarOrLabel v <> " "
+                                <> (if isVar v 
+                                        && isMemberVar m then "has " else "")
+                                <> showHasMember m
+                                <> compile n
+    compile (VarHas v v' m n)   = "; "
+                                <> showVarOrLit v <> " has "
+                                <> showVarOrLit v' <> " "
+                                <> showVarOrText m
+                                <> compile n
+    compile (HasTitle v m n)    = ", "
+                                <> showVarOrLit v <> " has title "
+                                <> showHasMember m
+                                <> compile n
+    compile (AttributeMatch v q n)
+                                = "; " <> showVarOrLit v <> " "
+                                <> showQShowOrCalc q
+                                <> compile n
+    compile (Like v t n)
+                                = "; " <> showVarOrLit v 
+                                <> " like "
+                                <> showVarOrText t
+                                <> compile n
+    compile (RelMatch (Just var) [] pat n) 
+                                = "; ("
+                                <> showVarOrLabel var <> ")"
+                                <> compile pat
+                                <> compile n
+    compile (RelMatch (Just var) rel pat n) 
+                                = "; "
+                                <> showVarOrLabel var <> " "
+                                <> showRelation rel
+                                <> compile pat
+                                <> compile n
+    compile (RelMatch Nothing rel pat n) 
+                                = "; "
+                                <> showRelation rel
+                                <> compile pat
+                                <> compile n
+    compile (Contains v a n)    = "; "
+                                <> showVarOrLit v 
+                                <> " contains "
+                                <> qshow a
+                                <> compile n
+    compile (Iid v t n)         = "; " 
+                                <> showVarOrLit v
+                                <> " iid "
+                                <> t
+                                <> compile n
+    compile (Sub v m n)         = "; "
+                                <> showVarOrLabel v 
+                                <> " sub "
+                                <> showVarOrLabel m
+                                <> compile n
+    compile (Sub' v m n)        = "; "
+                                <> showVarOrLabel v 
+                                <> " sub! "
+                                <> showVarOrLabel m
+                                <> compile n
+    compile (Type_ v m n)       = "; "
+                                <> showVarOrLabel v 
+                                <> " type "
+                                <> showVarOrLabel m
+                                <> compile n
+    compile (Relates v v' (Just v'') n)
+                                = "; "
+                                <> showVarOrLabel v 
+                                <> " relates "
+                                <> showVarOrLabel v'
+                                <> " as "
+                                <> showVarOrLabel v''
+                                <> compile n
+    compile (Relates v v' Nothing n)
+                                = "; "
+                                <> showVarOrLabel v 
+                                <> " relates "
+                                <> showVarOrLabel v'
+                                <> compile n
+    compile (Relates_ l n)      = ", relates "
+                                <> showVarOrLabel l
+                                <> compile n
+    compile (RelatesAs l l' n)  = ", relates "
+                                <> showVarOrLabel l
+                                <> " as "
+                                <> showVarOrLabel l'
+                                <> compile n
+    compile (Plays v r n)       = "; "
+                                <> showVarOrLabel v 
+                                <> " plays "
+                                <> showRolePlay r
+                                <> compile n
+    compile (Plays_ r n)        = ", plays "
+                                <> showRolePlay r
+                                <> compile n
+    compile (Or a b n)          = "; { " 
+                                <> (removeTrailing $ compilePattern a)
+                                <> "; }"
+                                <> " or "
+                                <> "{ " 
+                                <> (removeTrailing $ compilePattern b)
+                                <> "; }"
+                                <> compile n
+    compile (Not v c n)         = "; not { " 
+                                <> showVarOrText v 
+                                <> " "
+                                <> showQShowOrCalc c
+                                <> "; }"
+                                <> compile n
+    compile (Own l False n)     = ", owns "
+                                <> showVarOrLabel l
+                                <> compile n
+    compile (Own l True n)      = ", owns "
+                                <> showVarOrLabel l
+                                <> " @key"
+                                <> compile n
+    compile (Own' l l' n)       = "; "
+                                <> showVarOrLabel l
+                                <> " owns "
+                                <> showVarOrLabel l'
+                                <> ", "
+                                <> compile n
+    compile (Abstract n)        = ", abstract"
+                                <> compile n
+    compile (Value v n)         = ", value "
+                                <> showVarOrLabel v
+                                <> compile n
+    compile (Regex t n)         = ", regex "
+                                <> showVarOrText t
+                                <> compile n
+
+-- friend-request relates $x as located
+--newtype Relation a b = Rel { fromRel :: (IsaMember a, IsaMember b) => [RolePlay a b]}
+showRelation :: (IsaMember a, IsaMember b) => Relation a b -> Text
+showRelation rel        = "( "
+                        <> (intercalate ", " $ map showRolePlay $ fromRel rel)
+                        <> " )"
+
+-- data RolePlay a b = RP { role :: IsaMember a => Maybe a, player :: IsaMember b => b }
+showRolePlay :: (IsaMember a, IsaMember b) => RolePlay a b -> Text
+showRolePlay (RP (Just role) player) = showIsaMember role 
+                                     <> ": " 
+                                     <> showIsaMember player
+showRolePlay (RP Nothing player)     = showIsaMember player
 
 data Pattern next where
     EndP :: Pattern ()
-    Isa :: (VarOrText v,VarOrText v') => v -> Maybe v' -> Pattern next -> Pattern ISA
-    Isa' :: (VarOrText v, VarOrText v') => v -> Maybe v' -> Pattern next -> Pattern ISA
-    Has :: (VarOrLit v, HasMember m') => v -> m' -> Pattern next -> Pattern next'
+    Isa :: (VarOrLabel v,VarOrLabel v') => v -> Maybe v' -> Pattern next -> Pattern ISA
+    Isa' :: (VarOrLabel v, VarOrLabel v') => v -> Maybe v' -> Pattern next -> Pattern ISA
+    Has :: (VarOrLabel v, HasMember m') => v -> m' -> Pattern next -> Pattern next'
     VarHas :: (VarOrLit v, VarOrLit v', VarOrText m') => v -> v' -> m' -> Pattern next -> Pattern next'
     HasTitle :: (VarOrLit v, HasMember m') => v -> m' -> Pattern next -> Pattern next'
     AttributeMatch :: QShowOrCalc a => Variable -> a -> Pattern next -> Pattern next'
-    RelMatch :: Maybe Variable -> Relation a b -> Pattern ISA -> Pattern next -> Pattern REL
-    Contains :: QShow a => Variable ->  a -> Pattern next -> Pattern next'
     Like :: Variable -> Text -> Pattern next -> Pattern next'
+    RelMatch :: (IsaMember a, IsaMember b) => Maybe Variable -> Relation a b -> Pattern ISA -> Pattern next -> Pattern REL
+    Contains :: QShow a => Variable ->  a -> Pattern next -> Pattern next'
     Iid :: Variable -> Text -> Pattern next -> Pattern next'
-    Sub :: (VarOrText v, VarOrText v') => v -> v' -> Pattern next -> Pattern next'
-    Sub' :: (VarOrText v, VarOrText v') => v -> v' -> Pattern next -> Pattern next'
-    Type_ :: (VarOrText v, VarOrText v') => v -> v' -> Pattern next -> Pattern next'
-    Relates :: (VarOrText v, VarOrText v', VarOrText v'') => v -> v' -> Maybe v'' -> Pattern next -> Pattern next'
-    Plays :: (VarOrText v) => v -> RolePlay a b -> Pattern next -> Pattern next'
+    Sub :: (VarOrLabel v, VarOrLabel v') => v -> v' -> Pattern next -> Pattern SUB
+    Sub' :: (VarOrLabel v, VarOrLabel v') => v -> v' -> Pattern next -> Pattern SUB
+    Type_ :: (VarOrLabel v, VarOrLabel v') => v -> v' -> Pattern next -> Pattern next'
+    Relates :: (VarOrLabel v, VarOrLabel v', VarOrLabel v'') => v -> v' -> Maybe v'' -> Pattern next -> Pattern next'
+    Relates_ :: Label -> Pattern next -> Pattern next'
+    RelatesAs :: Label -> Label -> Pattern next -> Pattern next'
+    Plays :: (VarOrLabel v,IsaMember a, IsaMember b) => v -> RolePlay a b -> Pattern next -> Pattern next'
+    Plays_ :: (IsaMember a, IsaMember b) => RolePlay a b -> Pattern next -> Pattern next'
     Or :: Pattern a -> Pattern b -> Pattern next -> Pattern next'
-    Not :: (VarOrText v, VarOrText v') => v -> Calculation v' -> Pattern next -> Pattern next'
+    Not :: (VarOrText v, VarOrLit v', Show v') => v -> Calculation v' -> Pattern next -> Pattern next'
+    Own :: Label -> Bool -> Pattern next -> Pattern next'
+    Own' :: Label -> Label -> Pattern next -> Pattern next'
+    Abstract :: Pattern next -> Pattern next'
+    Value :: Label -> Pattern next -> Pattern next'
+    Regex :: Text -> Pattern next -> Pattern next'
 
--- $p isa person
-pIsaPerson :: Pattern ISA
-pIsaPerson = (Var "p") `isa` "person" $ EndP
+regex :: Text -> Pattern next -> Pattern next'
+regex = Regex
 
-isa :: Variable -> Text -> (Pattern next -> Pattern ISA)
+value :: Label -> Pattern next -> Pattern next'
+value = Value
+
+relatedAs :: Label -> Label -> Pattern next -> Pattern next'
+relatedAs = RelatesAs
+
+relates_ :: Label -> Pattern next -> Pattern next'
+relates_ = Relates_
+
+abstract :: Pattern next -> Pattern next'
+abstract = Abstract
+
+owns :: Label -> Pattern next -> Pattern next'
+owns l = Own l False
+
+owns' :: Label -> Label -> Pattern next -> Pattern next'
+owns' = Own'
+
+ownsKey :: Label -> Pattern next -> Pattern next'
+ownsKey l = Own l True
+
+isa :: Variable -> Label -> (Pattern next -> Pattern ISA)
 isa var mt = Isa var (Just mt)
 
-isa_ :: Text -> (Pattern next -> Pattern ISA)
-isa_ t = Isa t (Nothing :: Maybe Text)
+isa_ :: Label -> (Pattern next -> Pattern ISA)
+isa_ t = Isa t (Nothing :: Maybe Label)
 
-isa' :: Variable -> Text -> (Pattern next -> Pattern ISA)
+isa' :: Variable -> Label -> (Pattern next -> Pattern ISA)
 isa' var mt = Isa' var (Just mt)
 
 isa'_ :: Variable -> (Pattern next -> Pattern ISA)
-isa'_ t = Isa' t (Nothing :: Maybe Text)
+isa'_ t = Isa' t (Nothing :: Maybe Label)
 
--- $p isa person, has full-name $n
-pIsaPersonHasFullNameN :: Pattern ISA
-pIsaPersonHasFullNameN
-  = (Var "p") `isa` "person"
-        $ has "fullName" (Var "n")
-        $ EndP
 
-has :: Text -> Variable -> Pattern next -> Pattern next'
+has :: Label -> Variable -> Pattern next -> Pattern next'
 has t var = Has t var
 
-labelHasValue :: Text -> Text -> Pattern next -> Pattern next'
-labelHasValue t var = Has t (Lbl var)
+labelHasValue :: Label -> Text -> Pattern next -> Pattern next'
+labelHasValue t var = Has t var
 
-labelMatches :: Text -> Variable -> Pattern next -> Pattern next'
+labelMatches :: Label -> Variable -> Pattern next -> Pattern next'
 labelMatches t var = Has t var
 
-hasValue :: Text -> Calculation a -> Pattern next -> Pattern next'
+hasValue :: (VarOrLit a) => Label -> Calculation a -> Pattern next -> Pattern next'
 hasValue t var = Has t var
 
 hasValue' :: VarField -> Text -> Pattern next -> Pattern next'
@@ -147,205 +436,78 @@ data VarField = VF { _v :: Variable, _l :: Label }
 varField :: Variable -> Label ->  VarField
 varField = VF
 
-calculatedBy :: Variable -> Calculation a -> Pattern next -> Pattern next'
+calculatedBy :: (VarOrLabel v, VarOrLit a) => v -> Calculation a -> Pattern next -> Pattern next'
 calculatedBy t var = Has t var
 
 generallyHas :: Variable -> Variable -> Pattern next -> Pattern next'
 generallyHas v v' = Has v v'
 
--- $emp (employer: $x, employee: $y) isa employment
-empIsaEmployment :: Pattern REL
-empIsaEmployment = relName (Var "emp")
-                     $ [rp "employer" (Var "x")
-                       ,rp "employee" (Var "y")]
-                        `isaRel` (isa_ "employment" $ EndP)
-                     $ EndP
 
 relName :: Variable -> Pattern REL -> Pattern REL
 relName v (RelMatch _ r i n) = RelMatch (Just v) r i n
 
-isaRel :: Relation a b -> Pattern ISA -> Pattern next -> Pattern REL
+isaRel :: (IsaMember a, IsaMember b) =>  Relation a b -> Pattern ISA -> Pattern next -> Pattern REL
 isaRel r i n = RelMatch (Nothing :: Maybe Variable) r i n
 
 
 emptyIsaRel :: Pattern ISA -> Pattern next -> Pattern REL
 emptyIsaRel i n = RelMatch (Nothing :: Maybe Variable) θ i n
 
-isaRel_ :: Relation a b -> Text -> Pattern REL
+isaRel_ :: (IsaMember a, IsaMember b) => Relation a b -> Label -> Pattern REL
 isaRel_ r i = RelMatch (Nothing :: Maybe Variable) r 
                        (isa_ i $ ε) 
             $ ε
 
 
-isaRel' :: Relation a b -> Text -> Pattern next -> Pattern REL
+isaRel' :: (IsaMember a, IsaMember b) => Relation a b -> Label -> Pattern next -> Pattern REL
 isaRel' r i n = RelMatch (Nothing :: Maybe Variable) r 
                        (isa_ i $ ε) 
             $ n
 
--- $emp (employer: $x, employee: $y) isa employment, has reference-id $ref
-empIsaEmploymentHasRepId :: Pattern REL
-empIsaEmploymentHasRepId = appendToRel empIsaEmployment
-                                $ "reference-id"
-                                    `has` (Var "ref")
-                                $ EndP
-                            
-
--- (employer: $x, employee: $y) isa employment
-nothingIsaEmployment :: Pattern REL
-nothingIsaEmployment = [rp "employer" (Var "x")
-                       ,rp "employee" (Var "y")]
-                            `isaRel` (isa_ "employment" EndP)
-                     $ EndP
-
--- $fr ($x, $y) isa friendship
-nothingIsaFriendship :: Pattern REL
-nothingIsaFriendship = relName (Var "fr")
-                         $   Rel (map (sRP . Var) ["x","y"])
-                                `isaRel` (isa_ "friendship" EndP)
-                    $ EndP
-
--- $x "like"
-xLike :: Pattern ()
-xLike = (Var "x") `like` "like"
-      $ EndP
 
 like :: Variable -> Text -> Pattern next -> Pattern next'
-like v t = AttributeMatch v t
+like v t = Like v t
 
--- $n isa nickname; $n "Mitzi"
-isaNicknameMitzi :: Pattern ISA
-isaNicknameMitzi 
-  = n `isa` "nickname"
-  $ n `matches` "Mitzi"
-  $ EndP
-      where n = Var "n"
 
 matches :: Variable -> Text -> Pattern next -> Pattern next'
 matches n t = AttributeMatch n t
 
--- $phone-number contains "+44"
-phoneNumberContains :: Pattern ()
-phoneNumberContains
-  = (Var "phone-number") `contains` "+44"
-  $ EndP
+matchesDate :: Variable -> Date -> Pattern next -> Pattern next'
+matchesDate n d = AttributeMatch n d
 
 contains :: Variable -> Text -> Pattern next -> Pattern next'
 contains v t = Contains v t 
 
--- $x like "(Miriam Morton|Solomon Tran)"
-xLikeRegex :: Pattern ()
-xLikeRegex 
-  = (Var "x") `like` "(Miriam Morton|Solomon Tran)" 
-  $ EndP
-
--- $p isa person, has nickname $nn, has full-name $fn
-pIsaPersonNicknameFullname :: Pattern ISA
-pIsaPersonNicknameFullname
-  = (Var "p") `isa` "person"
-  $ "nickname" `has` (Var "nn") 
-  $ "full-name" `has` (Var "fn") 
-  $ EndP
-
--- $s isa school, has ranking < 100
-sIsaSchoolHasRanking :: Pattern ISA
-sIsaSchoolHasRanking
-  = (Var "s") `isa` "school"
-  $ "ranking" `hasValue` (R_LT (100::Int)) 
-  $ EndP
-
--- $s isa school, has ranking $r; $r < 100
-sIsaSchoolHasRankingSep :: Pattern ISA
-sIsaSchoolHasRankingSep 
-  = (Var "s") `isa` "school"
-  $ "ranking" `has` (Var "r")
-  $ (Var "r") `calculatedBy` (R_LT (100::Int)) 
-  $ EndP
-
--- $p isa person, has full-name $fn; { $fn contains "Miriam"; } or { $fn contains "Solomon"; }
-personFullNameAorB :: Pattern ISA
-personFullNameAorB
-  = (Var "p") `isa` "person"
-  $ "full-name" `has` (Var "fn")
-  $ (Contains (Var "fn") ("Miriam" :: Text) EndP)
-        `or` 
-    (Contains (Var "fn") ("Solomon" :: Text) EndP)
-  $ EndP
 
 or :: Pattern a -> Pattern b -> Pattern next -> Pattern next'
 or a b = Or a b 
 
--- $rr isa! romantic-relationship
-isa'RomanticRelationship :: Pattern ISA
-isa'RomanticRelationship 
-  = (Var "rr") `isa'` "romantic-relationship" $ε
-
--- $x iid 0x966e80018000000000000000
-xIIDSomething :: Pattern ()
-xIIDSomething
-  = (Var "x") `iid` "0x966e80018000000000000000"
-  $ EndP
-
 iid :: Variable -> Text -> Pattern next -> Pattern next'
 iid v t = Iid v t 
 
--- $x sub post
-xSubPost :: Pattern ()
-xSubPost = (Var "x") `sub` "post"
-         $ EndP
-
-sub :: Variable -> Text -> Pattern next -> Pattern next'
+sub :: VarOrLabel v => v -> Label -> Pattern next -> Pattern SUB
 sub v t = Sub v t 
 
-sub' :: Variable -> Text -> Pattern next -> Pattern next'
+sub' :: VarOrLabel v => v -> Label -> Pattern next -> Pattern SUB
 sub' v t = Sub' v t 
 
--- $x sub! post
-xSub'Post :: Pattern ()
-xSub'Post = (Var "x") `sub'` "post"
-          $ EndP
-
--- $x type post
-xTypePost :: Pattern ()
-xTypePost = (Var "x") `typeOf` "post"
-          $ EndP
-
-typeOf :: Variable -> Text -> Pattern next -> Pattern next'
+typeOf :: Variable -> Label -> Pattern next -> Pattern next'
 typeOf v t = Type_ v t 
 
--- employment relates $x
-employmentRelatesX :: Pattern ()
-employmentRelatesX = "employment" `relates` (Var "x") 
-                   $ EndP
+relates :: Label -> Variable -> Pattern next -> Pattern next'
+relates t v = Relates t v (Nothing :: Maybe Label)
 
-relates :: Text -> Variable -> Pattern next -> Pattern next'
-relates t v = Relates t v (Nothing :: Maybe Text)
+relates' :: Label -> Variable -> Pattern next'
+relates' t v = Relates t v (Nothing :: Maybe Label) EndP
 
-relates' :: Text -> Variable -> Pattern next'
-relates' t v = Relates t v (Nothing :: Maybe Text) EndP
-
-as :: Pattern a -> Text -> Pattern next -> Pattern next'
+as :: Pattern a -> Label -> Pattern next -> Pattern next'
 as (Relates t v _ _) a = Relates t v (Just a)
 
--- friend-request relates $x as located
-friendRequestRelatesXAsLocated :: Pattern ()
-friendRequestRelatesXAsLocated
-  = "friend-request" `relates'` (Var "x") 
-        `as` "located"
-  $ EndP
-
--- $x plays employment:employee
-xPlaysEmploymentEmployee :: Pattern ()
-xPlaysEmploymentEmployee 
-  = (Var "x") `plays` (RP (Just ("employment"::Text)) "employee")
-  $ EndP
-
-plays :: Variable -> RolePlay a b -> Pattern next -> Pattern next'
+plays :: (IsaMember a, IsaMember b) => Variable -> RolePlay a b -> Pattern next -> Pattern next'
 plays v r = Plays v r 
 
--- $x has title $t
-xHasTitleT :: Pattern ()
-xHasTitleT = (Var "x") `hasTitle` (Var "t")
-            $ EndP
+plays_ :: (IsaMember a, IsaMember b) => RolePlay a b -> Pattern next -> Pattern next'
+plays_ r = Plays_ r 
 
 hasTitle :: Variable -> Variable -> Pattern next -> Pattern next'
 hasTitle v v' = HasTitle v v'
@@ -357,20 +519,33 @@ appendToIsa :: Pattern ISA -> Pattern b -> Pattern ISA
 appendToIsa (Isa v v' _) b = Isa v v' b 
 appendToIsa (Isa' v v' _) b = Isa v v' b
 
+appendToSub :: Pattern SUB -> Pattern b -> Pattern SUB
+appendToSub (Sub v v' _) b = Sub v v' b
+appendToSub (Sub' v v' _) b = Sub v v' b
+
 append :: Pattern () -> Pattern b -> Pattern b
 append (EndP) b = b
 append (Has v m' _) b = Has v m' b
 append (HasTitle m' t _) b = HasTitle m' t b
 append (AttributeMatch v a _) b = AttributeMatch v a b
 append (Contains v a _) b = Contains v a b
-append (Like v t _) b = Like v t b
 append (Iid v t _) b = Iid v t b
-append (Sub v v' _) b = Sub v v' b
 
 
 data TypeDBOrdering = ASC | DEC
 data Modifier = Limit Int | Order Text | Offset Int
               | Sort Variable TypeDBOrdering
+
+showOrdering :: TypeDBOrdering -> Text
+showOrdering ASC = "asc"
+showOrdering DEC = "dec"
+
+
+showModifier :: Modifier -> Text
+showModifier (Limit i) = "limit " <> (pack $ show i)
+showModifier (Order t) = "order " <> t
+showModifier (Offset i) = "offset " <> (pack $ show i)
+showModifier (Sort v o) = "sort " <> (showVarOrText v) <> " " <> (showOrdering o)
 
 data GET 
 data DELETE
@@ -383,18 +558,204 @@ data MIN
 data MEAN
 data MEDIAN
 data GROUP
+data DEFINE
+data UNDEFINE
+
+data QueryType = QT_GET 
+               | QT_DELETE
+               | QT_INSERT
+               | QT_UPDATE
+               | QT_AGGREGATE
+               | QT_DEFINE
+               | QT_EXPLAIN
+    deriving (Eq,Show,Ord)
 
 
+getQueryType :: Query a -> [QueryType]
+getQueryType = sort . qt
+    where
+    qt :: Query a -> [QueryType]
+    qt = \case
+        (Get _ _) -> [QT_GET]
+        (Get' _ _ _) -> [QT_GET]
+        (Get_ _) -> [QT_GET]
+        (Delete _ _) -> [QT_DELETE]
+        (Delete' _ _ _) -> [QT_DELETE]
+        (DeleteRel _ _ _) -> [QT_DELETE]
+        (DeleteRel' _ _ _ _) -> [QT_DELETE]
+        (Insert _ _) -> [QT_INSERT]
+        (InsertRel _ _ _) -> [QT_INSERT]
+        (Update _ _) -> [QT_UPDATE]
+        (Count a _) -> QT_AGGREGATE : qt a
+        (Sum a _) -> QT_AGGREGATE : qt a
+        (Max a _) -> QT_AGGREGATE : qt a
+        (Min a _) -> QT_AGGREGATE : qt a
+        (Mean a _) -> QT_AGGREGATE : qt a
+        (Median a _) -> QT_AGGREGATE : qt a
+        (Group a _) -> QT_AGGREGATE : qt a
+        (Define _) -> [QT_DEFINE]
+        (Undefine _) -> [QT_DEFINE]
+    
+
+compileQuery :: Query a -> Text
+compileQuery (Get p vs) = "match "
+                        <> (removeTrailing $ compilePattern p)
+                        <> "; get "
+                        <> (T.intercalate ", " $ map showVarOrLabel vs)
+                        <> ";"
+compileQuery (Get' p vs mods)
+                        = "match "
+                        <> (removeTrailing $ compilePattern p)
+                        <> "; get "
+                        <> (T.intercalate ", " $ map showVarOrLabel vs)
+                        <> "; "
+                        <> showMods mods
+                        <> ";"
+compileQuery (Get_ p)   = "match "
+                        <> (removeTrailing $ compilePattern p)
+                        <> "; get;"
+compileQuery (Delete m d)
+                        = "match "
+                        <> (removeTrailing $ compilePattern m)
+                        <> "; delete "
+                        <> (removeTrailing $ compilePattern d)
+                        <> ";"
+compileQuery (Delete' m d mods)
+                        = "match "
+                        <> (removeTrailing $ compilePattern m)
+                        <> "; delete "
+                        <> (removeTrailing $ compilePattern d)
+                        <> "; "
+                        <> showMods mods
+                        <> ";"
+compileQuery (DeleteRel p Nothing  rel) 
+                        = "match "
+                        <> (removeTrailing $ compilePattern p)
+                        <> "; delete "
+                        <> showRelation rel
+                        <> ";"
+compileQuery (DeleteRel p (Just a)  rel) 
+                        = "match "
+                        <> (removeTrailing $ compilePattern p)
+                        <> "; delete "
+                        <> showVarOrLabel a
+                        <> " "
+                        <> showRelation rel
+                        <> ";"
+compileQuery (DeleteRel' p Nothing  rel mods) 
+                        = "match "
+                        <> (removeTrailing $ compilePattern p)
+                        <> "; delete "
+                        <> showRelation rel
+                        <> "; "
+                        <> showMods mods 
+                        <> ";"
+compileQuery (DeleteRel' p (Just a)  rel mods) 
+                        = "match "
+                        <> (removeTrailing $ compilePattern p)
+                        <> "; delete "
+                        <> showVarOrLabel a
+                        <> " "
+                        <> showRelation rel
+                        <> "; "
+                        <> showMods mods 
+                        <> ";"
+compileQuery (Insert Nothing p) 
+                        = "insert "
+                        <> (removeTrailing $ compilePattern p)
+                        <> ";"
+compileQuery (Insert (Just pa) p) 
+                        = "match "
+                        <> (removeTrailing $ compilePattern pa)
+                        <> "; insert "
+                        <> (removeTrailing $ compilePattern p)
+                        <> ";"
+compileQuery (InsertRel Nothing Nothing r)
+                        = "insert "
+                        <> showRelation r
+                        <> ";"
+compileQuery (InsertRel Nothing (Just var) r)
+                        = "insert "
+                        <> showVarOrLabel var
+                        <> " "
+                        <> showRelation r
+                        <> ";"
+compileQuery (InsertRel (Just p) (Just var) r)
+                        = "match "
+                        <> (removeTrailing $ compilePattern p)
+                        <> "insert "
+                        <> showVarOrLabel var
+                        <> " "
+                        <> showRelation r
+                        <> ";"
+             -- other cases for InsertRel ruled out by smart constructors
+compileQuery (Update del ins) 
+                        = compileQuery del
+                        <> " "
+                        <> compileQuery ins
+compileQuery (Count q vars) 
+                        = compileQuery q
+                        <> " count"
+                        <> (if length vars > 0 then " " else "")
+                        <> (T.intercalate ", " $ map showVarOrLabel vars)
+                        <> ";"
+compileQuery (Sum q vars) 
+                        = compileQuery q
+                        <> " sum"
+                        <> (if length vars > 0 then " " else "")
+                        <> (T.intercalate ", " $ map showVarOrLabel vars)
+                        <> ";"
+compileQuery (Max q vars) 
+                        = compileQuery q
+                        <> " max"
+                        <> (if length vars > 0 then " " else "")
+                        <> (T.intercalate ", " $ map showVarOrLabel vars)
+                        <> ";"
+compileQuery (Min q vars) 
+                        = compileQuery q
+                        <> " min"
+                        <> (if length vars > 0 then " " else "")
+                        <> (T.intercalate ", " $ map showVarOrLabel vars)
+                        <> ";"
+compileQuery (Mean q vars) 
+                        = compileQuery q
+                        <> " mean"
+                        <> (if length vars > 0 then " " else "")
+                        <> (T.intercalate ", " $ map showVarOrLabel vars)
+                        <> ";"
+compileQuery (Median q vars) 
+                        = compileQuery q
+                        <> " median"
+                        <> (if length vars > 0 then " " else "")
+                        <> (T.intercalate ", " $ map showVarOrLabel vars)
+                        <> ";"
+compileQuery (Group q vars) 
+                        = compileQuery q
+                        <> " group"
+                        <> (if length vars > 0 then " " else "")
+                        <> (T.intercalate ", " $ map showVarOrLabel vars)
+                        <> ";"
+compileQuery (Define p) = "define "
+                        <> (removeTrailing $ compilePattern p)
+                        <> ";"
+compileQuery (Undefine p) = "undefine "
+                        <> (removeTrailing $ compilePattern p)
+                        <> ";"
+
+showMods :: [Modifier] -> Text
+showMods mods = (T.intercalate ", " $ map showModifier mods)
+
+-- TODO: EXPLAIN && COMPUTE!!
 data Query a where
     Get :: Pattern a -> [Variable] -> Query GET
     Get' :: Pattern a -> [Variable] -> [Modifier] -> Query GET
     Get_ :: Pattern a -> Query GET
     Delete :: Pattern a -> Pattern b -> Query DELETE
     Delete' :: Pattern a -> Pattern b -> [Modifier] -> Query DELETE
-    DeleteRel :: Pattern a -> Maybe Variable -> Relation b c -> Query DELETE
-    DeleteRel' :: Pattern a -> Maybe Variable -> Relation b c -> [Modifier] -> Query DELETE
+    DeleteRel :: (IsaMember b, IsaMember c) => Pattern a -> Maybe Variable -> Relation b c -> Query DELETE
+    DeleteRel' :: (IsaMember b, IsaMember c) => Pattern a -> Maybe Variable -> Relation b c -> [Modifier] -> Query DELETE
     Insert :: Maybe (Pattern a) -> Pattern b -> Query INSERT
-    InsertRel :: Maybe (Pattern a) -> Maybe Variable-> Relation b c -> Query INSERT
+    InsertRel :: (IsaMember b, IsaMember c) => Maybe (Pattern a) -> Maybe Variable-> Relation b c -> Query INSERT
     Update :: Query DELETE -> Query INSERT -> Query UPDATE
     Count :: Query a -> [Variable] -> Query COUNT
     Sum :: Query a -> [Variable] -> Query SUM
@@ -403,16 +764,13 @@ data Query a where
     Mean :: Query a -> [Variable] -> Query MEAN
     Median :: Query a -> [Variable] -> Query MEDIAN
     Group :: Query a -> [Variable] -> Query GROUP
+    Define :: Pattern a -> Query DEFINE
+    Undefine :: Pattern a -> Query UNDEFINE
 
 
-{-
-match
-$fr ($x, $y) isa friendship;
-$x isa person, has full-name $x-fn;
-$x-fn contains "Miriam";
-$y isa person, has full-name $y-fn, has phone-number $y-pn;
-get $x-fn, $y-fn, $y-pn;
--}
+
+undefine :: Pattern a -> Query UNDEFINE 
+undefine = Undefine
 
 match :: Pattern a -> Pattern a
 match = id
@@ -423,27 +781,6 @@ get = Get
 get' :: Pattern a -> [Variable] -> ([Modifier] -> Query GET)
 get' = Get'
 
-bigMatch :: Query GET
-bigMatch = match 
-         ( relName fr
-         $ Rel (map (sRP . Var) ["x","y"])
-             `isaRel` (isa_ "friendship" EndP)
-         $ x `isa` "person"
-         $ has "full-name" x_fn
-         $ x_fn `contains` "Miriam"
-         $ y `isa` "person"
-         $ has "full-name" y_fn
-         $ has "phone-number" y_pn
-         $ EndP )
-          `get` [x_fn,y_fn,y_pn]
-
-    where 
-        fr = Var "fr"
-        x = Var "x"
-        y = Var "y"
-        x_fn = Var "x-fn"
-        y_fn = Var "y-fn"
-        y_pn = Var "y-pn"
 
 ε :: Pattern ()
 ε = (EndP)
@@ -452,98 +789,23 @@ bigMatch = match
 e :: Pattern ()
 e = (EndP)
 
--- match $p isa person; get $p; limit 1;
-smallMatch :: Query GET
-smallMatch = match 
-           ( p `isa` "person" $ ε)
-                `get'` [p] $ [Limit 1]
-    where 
-        p = Var "p"
-
--- match $p isa person, has full-name $fn; get $fn; sort $fn asc;
-matchWithSort :: Query GET
-matchWithSort = match
-              ( p `isa` "person" 
-              $ has "full-name" fn $ ε)
-                `get'` [fn] $ [Sort fn ASC]
-        where
-            [p,fn]= map Var ["p","fn"]
-                
 
 delete :: Pattern a -> Pattern b -> Query DELETE 
 delete = Delete
 
-deleteRelation :: Pattern a -> Variable -> Relation b c -> Query DELETE
+deleteRelation :: (IsaMember b, IsaMember c) => Pattern a -> Variable -> Relation b c -> Query DELETE
 deleteRelation p v r = DeleteRel p (Just v) r
 
-deleteRelation' :: Pattern a -> Variable -> Relation b c -> ([Modifier] -> Query DELETE)
+deleteRelation' :: (IsaMember b, IsaMember c) => Pattern a -> Variable -> Relation b c -> ([Modifier] -> Query DELETE)
 deleteRelation' p v r = DeleteRel' p (Just v) r
 
 delete' :: Pattern a -> Pattern b-> ([Modifier] -> Query DELETE)
 delete' = Delete'
 
-{- match $p isa person
-    , has email "someMail"; 
-   delete $p isa person;
--}
-deletePersonByMail :: Query DELETE
-deletePersonByMail 
-    = match
-    ( p `isa` "person"
-    $ forWhich "email" `labelHasValue` "someMail" $ ε)
-        `delete` (p `isa` "person" $ ε)
-    where
-        p = Var "p"
-
 forWhich :: a -> a
 forWhich = id
 asWellAs :: a -> a
 asWellAs = id
-{- match
-    $org isa organisation, has name "Pharos";
-    $emp (employer: $org, employee: $p) isa employment;
-    delete $emp isa employment;
--}
-removeEmployee :: Query DELETE
-removeEmployee 
-    = match 
-    ( org `isa` "organisation" 
-    $ forWhich "name" `labelHasValue` "Pharos"
-    $ relName emp 
-        $ [rp "employer" org, rp "employee" p]
-            `isaRel_` "friendship")
-        `delete` (emp `isa` "employment" $ ε)
-    where
-        [emp,org,p] = map Var ["emp","org","p"]
-
--- match $t isa travel, has start-date $st; $d 2013-12-22; delete $t has $st;
-deleteAttribute :: Query DELETE
-deleteAttribute
-    = match 
-    ( t `isa` "travel"
-    $ has "start-date" st
-    $ asWellAs d `matches` "2013-12-22" $ε)
-        `delete` (t `generallyHas` st $ε)
-    where
-        [t,st,d] = map Var ["t","st","d"]
-
-{- match
-    $org isa organisation, has name "Pharos";
-    $emp (employer: $org, employee: $p) isa employment;
-    delete $emp (employer: $org);
--}
-deleteRolePlayers :: Query DELETE
-deleteRolePlayers 
-    = match
-    ( org `isa` "organisation"
-    $ forWhich "name" `labelHasValue` "Pharos"
-    $ relName emp
-        $ [rp "employer" org,rp "employee" p]
-            `isaRel_` "employment")
-    `deleteRelation` emp $ [rp "employer" org]
-    where 
-        [org,p,emp] = map Var ["org","p","emp"]
-
 insert :: Pattern a -> Pattern b -> Query INSERT
 insert a b = Insert (Just a) b
 
@@ -555,189 +817,14 @@ insert_ b = Insert (Nothing :: Maybe (Pattern ())) b
 
 
 
-insertRelation :: Pattern a -> Variable -> Relation b c -> Query INSERT
+insertRelation :: (IsaMember b, IsaMember c) => Pattern a -> Variable -> Relation b c -> Query INSERT
 insertRelation p v r = InsertRel (Just p) (Just v) r
 
-insertRelation_ :: Variable -> Relation b c -> Query INSERT
+insertRelation_ :: (IsaMember b, IsaMember c) => Variable -> Relation b c -> Query INSERT
 insertRelation_ v r = InsertRel (Nothing:: Maybe (Pattern ())) (Just v) r
 
-{- insert $p isa person, 
-    has full-name "John Parkson", 
-    has gender "male", 
-    has email "someEmail",
-    has phone-number "+44-1234=567890";
--}
-insertPerson :: Query INSERT
-insertPerson 
-    = insert_
-    ( p `isa` "person"
-    $ forWhich "full-name" `labelHasValue` "John Parkson"
-    $ asWellAs "gender" `labelHasValue` "male"
-    $ asWellAs "email" `labelHasValue` "someEmail"
-    $ asWellAs "phone-number" `labelHasValue` "+44-1234=567890" $ε)
-        where
-            p = Var "p"
-
--- insert $x isa emotion; $x "like";
-insertEmotion :: Query INSERT
-insertEmotion 
-    = insert_
-    ( x `isa` "emotion"
-    $ x `matches` "like" $ε)
-        where 
-            x = Var "x"
-
-{-
-match
-    $org isa organisation, has name "Facelook";
-    $person isa person, has email "someEmail";
-insert $new-employment (employer: $org, employee: $person) isa employment;
-    $new-employment has reference-id "WGFTSH";
--}
-insertInstanceOfRelType :: Query INSERT
-insertInstanceOfRelType
-    = (match
-    $ org `isa` "organisation"
-    $ forWhich "name" `labelHasValue` "Facelook"
-    $ person `isa` "person"
-    $ forWhich "email" `labelHasValue` "someEmail" $ε)
-        `insert`
-    (relName new_employment
-        $ [rp "employer" org, rp "employee" person]
-            `isaRel'` "employment"
-    $ new_employment `varField` "reference-id" 
-                  `hasValue'` "WGFTSH" $ε)
-    where
-        [org,person,new_employment] = map Var ["org","person","new_employment"]
-
-
-{-
-match
-    $person isa person;
-insert
-    $reflexive-friendship (friend: $person, friend: $person) isa friendship;
--}
-duplicateRolePLayers :: Query INSERT
-duplicateRolePLayers
-    = match 
-    ( person `isa` "person" $ε)
-      `insert`
-    ( relName reflexive_friendship
-        $ [rp "friend" person, rp "friend" person]
-        `isaRel_` "friendship")
-    where 
-        [reflexive_friendship, person] 
-          = map Var ["reflexive_friendship", "person"]
-
-{-
-match 
-    $friendship (friend: $p, friend: $p) isa friendship; 
-get $friendship;
--}
-matchDuplicates :: Query GET
-matchDuplicates 
-    = match
-    ( relName friendship 
-        $ [rp "friend" p, rp "friend" p]
-        `isaRel_` "friendship")
-    `get` [friendship]
-        where
-            [friendship,p] = map Var ["friendship", "p"]
-
-
-not :: (VarOrText v, VarOrText v') => v -> Calculation v' -> Pattern next -> Pattern next'
+not :: (VarOrText v, VarOrLit v', Show v') => v -> Calculation v' -> Pattern next -> Pattern next'
 not = Not
-
-{-
-match
-$emp (employer: $org, employee: $p) isa employment;
-    $p2 isa person;
-    not { $p = $p2; };
-insert $emp (employee: $p2) isa employment;
--}
-extendingRelation :: Query INSERT
-extendingRelation 
-    = match
-    ( relName emp
-        $ [rp "employer" org, rp "employee" p]
-        `isaRel'` "employment"
-    $ p2 `isa` "person"
-    $ not p (R_EQ p2) $ε)
-      `insert`
-    ( relName emp
-        $ [rp "employee" p2]
-        `isaRel_` "employemnt")
-    where
-        [emp,p,p2,org] = map Var ["emp","p","p2","org"]
-
-
-
-{-
-match $org isa organisation, has name "Medicely", has registration-number $rn;
-delete $org has $rn;
-insert $org has registration-number "81726354";
--}
-updateAttributeOwnedByConcept :: Query UPDATE
-updateAttributeOwnedByConcept
-    = ((match
-        ( org `isa` "organisation"
-        $ forWhich "name" `labelHasValue` "Medicely"
-        $ asWellAs "registration-number" `labelMatches` rn $ε))
-      `delete` ( org `generallyHas` rn $ε))
-      `update`
-      (insert_ ( org `varField` "registration-number"
-                        `hasValue'` "81726354" $ε))
-    where 
-        [org,rn] = map Var ["org","rn"]
-
-{-
-match
-    $m isa media, has caption $c;
-    $c contains "inappropriate word";
-delete 
-    $c isa caption;
-insert 
-    $m has caption "deleted";
--}
-
-updateInstancesOfAttribute :: Query UPDATE
-updateInstancesOfAttribute
-    = update
-        (( match
-          $ m `isa` "media"
-          $ forWhich "caption" `labelMatches` c 
-          $ c `contains` "inappropriate word" $ε)
-          `delete` (c `isa'` "caption" $ε))
-        ( insert_ 
-        $   m `varField` "caption"
-                    `hasValue'` "deleted" $ε)
-    where 
-        [m,c] = map Var ["m","c"]
-{-
-match
-    $org isa organisation, has name "Pharos";
-    $new-org isa organisation, has name "Medicely";
-    $emp (employer: $org, employee: $p) isa employment;
-delete
-    $emp (employer: $org);
-insert
-    $emp (employer: $new-org);
--}
-modifyingRoleplayers :: Query UPDATE
-modifyingRoleplayers
-    = update 
-        (( match 
-         $ org `isa` "organisation"
-         $ forWhich "name" `labelHasValue` "Pharos"
-         $ new_org `isa` "organisation"
-         $ forWhich "name" `labelHasValue` "Medicely"
-         $ relName emp
-            $ [rp "employer" org, rp "employee" p]
-                `isaRel_` "employment")
-         `deleteRelation` emp $ [rp "employer" org]
-         )
-        (insertRelation_ emp [rp "employer" new_org])
-
 
 
 count :: Query a -> [Variable] -> Query COUNT
@@ -754,40 +841,6 @@ sum = Sum
 
 (!$) :: a -> (a -> b) -> b
 (!$) = flip ($)
-{-
-match
-    $sce isa studentship, has score $sco;
-    $sco > 7.0;
-get $sco; 
-count;
--}
-countQuery :: Query COUNT
-countQuery = match
-           ( sce `isa` "studentship"
-           $ forWhich "score" `labelMatches` sco
-           $ sco `calculatedBy` (R_GT 7.0) $ε)
-            `get` [sco]
-           !$ count_
-
-{-
-match
-    $org isa organisation, has name $orn;
-    $orn "Medicely";
-    ($org) isa employment, has salary $sal;
-get $sal; 
-sum $sal;
--}
-sumQuery :: Query SUM
-sumQuery = match
-         ( org `isa` "organisation"
-         $ forWhich "name" `labelMatches` orn
-         $ orn `matches` "Medicely"
-         $ relName org
-            $ emptyIsaRel (isa_ "employment" $ε)
-         $ forWhich "salary" `labelMatches` sal $ε)
-         `get` [sal]
-         `sum` [sal]
-
 emptyRel :: Relation Text Text 
 emptyRel = []
 
@@ -825,98 +878,17 @@ group = Group
 
 group_ :: Query GET -> Query GROUP
 group_ a = Group a []
-{-
-match
-    $sch isa school, has ranking $ran;
-get $ran; max $ran;
--}
-maxQuery :: Query MAX
-maxQuery = match
-         ( sch `isa` "school"
-         $ forWhich "ranking" `labelMatches` ran $ε)
-         `get` [ran]
-         `max` [ran]
 
-
-partOfRel :: Variable -> Text -> Pattern next -> Pattern REL
+partOfRel :: Variable -> Label -> Pattern next -> Pattern REL
 partOfRel v t = relName v
                 . emptyIsaRel (isa_ t $ε)
 
 
-{-
-match
-    ($per) isa marriage;
-    ($per) isa employment, has salary $sal;
-get $sal;
-min $sal;
--}
-minQuery :: Query MIN
-minQuery = match 
-         ( per `partOfRel` "marriage"
-         $ per `partOfRel` "employment"
-         $ forWhich "salary" `labelMatches` sal $ε)
-         `get` [sal]
-         `min` [sal]
-
-{-
-match
-    $emp isa employment, has salary $sal;
-get $sal; 
-mean $sal;
--}
-meanQuery :: Query MEAN
-meanQuery = match
-          ( emp `isa` employment
-          $ forWhich salary `labelMatches` sal $ε)
-          `get` [sal]
-          `mean` [sal]
-          
-
-{-
-match
-    $org isa organisation, has name $orn;
-    $orn = "Facelook";
-    (employer: $org, employee: $per) isa employment;
-    ($per) isa studentship, has score $sco;
-get $sco; 
-median $sco;
--}
-medianQuery :: Query MEDIAN
-medianQuery = match
-            ( org `isa` organisation
-            $ forWhich name `labelMatches` orn 
-            $ [employer `rp` org, employee `rp` per]
-                `isaRel` (isa_ employment $ε)
-            $ relName per 
-                $ emptyIsaRel (isa_ studentship $ε)
-            $ forWhich score `labelMatches` sco $ε)
-            `get` [sco]
-            `median` [sco]
-            
-
-{-
-match
-    $per isa person;
-    $scc isa school-course, has title $title;
-    (student: $per, course: $scc) isa studentship;
-get $scc, $title; 
-group $title;
--}
-groupQuery :: Query GROUP
-groupQuery = match 
-           ( per `isa` person
-           $ scc `isa` school_course
-           $ forWhich "title" `labelMatches` title
-           $ ["student" `rp` per, course `rp` scc]
-                `isaRel_` studentship )
-           `get` [scc,title]
-           `group` [title]
 
 
-countGroupQuery :: Query COUNT
-countGroupQuery = groupQuery !$ count_
+define :: Pattern a -> Query DEFINE
+define = Define
 
-[defTxts| ;employment;organisation;employee;student
-          ;studentship;employer;score;name;salary;
-          ;school-course;course;person|]
-[defVars| per sch ran org orn sal sce sco new_org emp p scc title |]
+                    
+[defLbls| ;entity;relation;attribute;string;datetime |]
+
