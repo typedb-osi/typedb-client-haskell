@@ -567,7 +567,9 @@ data QueryType = QT_GET
                | QT_UPDATE
                | QT_AGGREGATE
                | QT_DEFINE
+               | QT_UNDEFINE
                | QT_EXPLAIN
+               | QT_GROUP
     deriving (Eq,Show,Ord)
 
 
@@ -592,9 +594,9 @@ getQueryType = sort . qt
         (Min a _) -> QT_AGGREGATE : qt a
         (Mean a _) -> QT_AGGREGATE : qt a
         (Median a _) -> QT_AGGREGATE : qt a
-        (Group a _) -> QT_AGGREGATE : qt a
+        (Group a _) -> QT_GROUP : qt a
         (Define _) -> [QT_DEFINE]
-        (Undefine _) -> [QT_DEFINE]
+        (Undefine _) -> [QT_UNDEFINE]
     
 
 compileQuery :: Query a -> Text

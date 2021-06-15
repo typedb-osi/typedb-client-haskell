@@ -16,7 +16,9 @@ main = do
                             (runTxDefault testTx testCallback) 
                   return $ Right res
               ) `runWith` defaultTypeDB ) 
-              (\(TypeDBError e) -> return $ Left e)
+              (\case 
+                (TypeDBError e) -> return $ Left e
+                (CompileError t q) -> return $ Left $ CompileError t q)
     
     print res
     return ()

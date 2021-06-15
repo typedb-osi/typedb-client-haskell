@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE RankNTypes #-}
 module TypeDBTransaction where
 import Prelude hiding (getStdGen)
 import Network.GRPC.HighLevel.Generated
@@ -28,9 +29,11 @@ import GHC.Int (Int32, Int64)
 
 import Control.Monad.Freer
 import Control.Monad.Freer.State
+import Control.Monad.Freer.Error
 import System.Random
 import Control.Monad.IO.Class
-import Control.Monad.Conc.Class hiding (throw, catch) 
+import Control.Monad.Conc.Class hiding (catch) 
+import Control.Exception (Exception(..))
 import TypeDBQuery
 
 data Sth a
@@ -441,73 +444,58 @@ getRules = send $ LogicManager $ Just
             $ Logic.LogicManager_GetRules_Req
 
 
-query :: Member TX b => Maybe Options -> Query a -> Eff b ()
+query :: (Member TX b, Member (Error CompileError) b) => Maybe Options -> Query a -> Eff b ()
 query opts q = case (getQueryType q) of
-            [QT_DEFINE] -> send $ QueryManager opts $ Just 
+            [QT_DEFINE] -> sendQuery
                                 $ Query.QueryManager_ReqReqDefineReq
                                 $ Query.QueryManager_Define_Req 
-                                $ toInternalLazyText $ compileQuery q
-            ...
+                                $ cq
+            [QT_UNDEFINE] -> sendQuery
+                                $ Query.QueryManager_ReqReqUndefineReq
+                                $ Query.QueryManager_Undefine_Req
+                                $ cq
+            [QT_GET] -> sendQuery
+                                $ Query.QueryManager_ReqReqMatchReq
+                                $ Query.QueryManager_Match_Req
+                                $ cq
+            [QT_AGGREGATE] -> sendQuery
+                                $ Query.QueryManager_ReqReqMatchAggregateReq
+                                $ Query.QueryManager_MatchAggregate_Req
+                                $ cq
+            [QT_GET,QT_GROUP] -> sendQuery
+                                $ Query.QueryManager_ReqReqMatchGroupReq
+                                $ Query.QueryManager_MatchGroup_Req
+                                $ cq
+            [QT_GET,QT_GROUP,QT_AGGREGATE] -> sendQuery
+                                $ Query.QueryManager_ReqReqMatchGroupAggregateReq
+                                $ Query.QueryManager_MatchGroupAggregate_Req
+                                $ cq
+            [QT_INSERT] -> sendQuery
+                                $ Query.QueryManager_ReqReqInsertReq
+                                $ Query.QueryManager_Insert_Req
+                                $ cq
+            [QT_DELETE] -> sendQuery
+                                $ Query.QueryManager_ReqReqDeleteReq
+                                $ Query.QueryManager_Delete_Req
+                                $ cq
+            [QT_UPDATE] -> sendQuery
+                                $ Query.QueryManager_ReqReqUpdateReq
+                                $ Query.QueryManager_Update_Req
+                                $ cq
+            [QT_EXPLAIN] -> sendQuery
+                                $ Query.QueryManager_ReqReqExplainReq
+                                $ Query.QueryManager_Explain_Req
+                                $ 0 -- TODO cq
+            a -> throwError (QueryTypeUndefined a cq_norm)
 
 
-{--- 
-
-data QueryManager_ReqReq = 
-                         | QueryManager_ReqReqUndefineReq Query.QueryManager_Undefine_Req
-                         | QueryManager_ReqReqMatchReq Query.QueryManager_Match_Req
-                         | QueryManager_ReqReqMatchAggregateReq Query.QueryManager_MatchAggregate_Req
-                         | QueryManager_ReqReqMatchGroupReq Query.QueryManager_MatchGroup_Req
-                         | QueryManager_ReqReqMatchGroupAggregateReq Query.QueryManager_MatchGroupAggregate_Req
-                         | QueryManager_ReqReqInsertReq Query.QueryManager_Insert_Req
-                         | QueryManager_ReqReqDeleteReq Query.QueryManager_Delete_Req
-                         | QueryManager_ReqReqUpdateReq Query.QueryManager_Update_Req
-                         | QueryManager_ReqReqExplainReq Query.QueryManager_Explain_Req
-                         deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
-
-todo:
+    where
+        sendQuery = send . QueryManager opts . Just
+        cq = toInternalLazyText $ cq_norm
+        cq_norm = compileQuery q
 
 
-data Transaction_ReqReq =
-                        | Transaction_ReqReqQueryManagerReq Query.QueryManager_Req
-                       
-
-data Thing = Thing{thingIid :: Hs.ByteString,
-                   thingType :: Hs.Maybe Concept.Type,
-                   thingValue :: Hs.Maybe Concept.Attribute_Value,
-                   thingInferred :: Hs.Bool}
-           deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
-
-data Type = Type{typeLabel :: Hs.Text, typeScope :: Hs.Text,
-                 typeEncoding :: HsProtobuf.Enumerated Concept.Type_Encoding,
-                 typeValueType ::
-                 HsProtobuf.Enumerated Concept.AttributeType_ValueType,
-                 typeRoot :: Hs.Bool}
-          deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
-
-data AttributeType_ValueType = AttributeType_ValueTypeOBJECT
-                             | AttributeType_ValueTypeBOOLEAN
-                             | AttributeType_ValueTypeLONG
-                             | AttributeType_ValueTypeDOUBLE
-                             | AttributeType_ValueTypeSTRING
-                             | AttributeType_ValueTypeDATETIME
-                             deriving (Hs.Show, Hs.Eq, Hs.Generic, Hs.NFData)
-
-data Type_Encoding = Type_EncodingTHING_TYPE
-                   | Type_EncodingENTITY_TYPE
-                   | Type_EncodingRELATION_TYPE
-                   | Type_EncodingATTRIBUTE_TYPE
-                   | Type_EncodingROLE_TYPE
-                   deriving (Hs.Show, Hs.Eq, Hs.Generic, Hs.NFData)
-
-data ConceptManager_ReqReq = ConceptManager_ReqReqGetThingTypeReq Concept.ConceptManager_GetThingType_Req
-                           | ConceptManager_ReqReqGetThingReq Concept.ConceptManager_GetThing_Req
-                           | ConceptManager_ReqReqPutEntityTypeReq Concept.ConceptManager_PutEntityType_Req
-                           | ConceptManager_ReqReqPutAttributeTypeReq Concept.ConceptManager_PutAttributeType_Req
-                           | ConceptManager_ReqReqPutRelationTypeReq Concept.ConceptManager_PutRelationType_Req
-                           deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic, Hs.NFData)
--}
-
-
+----------------------------
 
 fromThingID' :: ThingID -> BS.ByteString
 fromThingID' = encodeUtf8 . fromThingID
@@ -515,11 +503,17 @@ fromThingID' = encodeUtf8 . fromThingID
 data CompilerState = CS { randomGen :: RandomTxIdGen
                         , program :: [Opts -> Transaction_Req] }
 
-compileTx :: RandomTxIdGen -> Eff '[TX] a -> [Opts -> Transaction_Req]
+data CompileError = QueryTypeUndefined { qt :: [QueryType]
+                                       , queryText :: Text }
+                deriving (Show)
+
+instance Exception CompileError where
+
+compileTx :: RandomTxIdGen -> Eff '[TX, Error CompileError] a -> Either CompileError [Opts -> Transaction_Req]
 compileTx gen req = reverse . program . snd 
-                  $ run (runState (CS gen []) (reinterpret interpret' req))
+                  <$> run (runError (runState (CS gen []) (reinterpret interpret' req)))
   where
-    interpret' :: TX v -> Eff '[State CompilerState] v
+    interpret' :: TX v -> Eff '[State CompilerState,Error CompileError] v
     interpret' (Open t o i) = withRandom (openTx_ t o i)
     interpret' (Commit) = withRandom (commitTx_)
     interpret' (Rollback) = withRandom (rollbackTx_)
@@ -538,14 +532,24 @@ runTxDefault tx callback = runTxWith tx [] callback
 
 
 
+runTxWithE :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBM m (Either CompileError (StatusCode, StatusDetails))
+runTxWithE tx opts callback = do
+    gen <- liftIO $ newStdGen 
+    let compiled = compileTx gen tx
+    case compiled of
+      Left err -> return $ Left err
+      Right comp -> Right <$> performTx (map ($opts) comp) callback
+
 runTxWith :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
 runTxWith tx opts callback = do
     gen <- liftIO $ newStdGen 
     let compiled = compileTx gen tx
-    performTx (map ($opts) compiled) callback
+    case compiled of
+      Left err -> throw err
+      Right comp -> performTx (map ($opts) comp) callback
 
 
-withRandom :: (String -> Opts -> Transaction_Req) -> Eff '[State CompilerState] ()
+withRandom :: Member (State CompilerState) a => (String -> Opts -> Transaction_Req) -> Eff a ()
 withRandom a = do
     g <- gets randomGen
     let r = randomRs ('a','z') g
@@ -553,18 +557,42 @@ withRandom a = do
     modify (\s -> s { randomGen = g', program = (a r):program s })
 
 
-type TypeDBTX = Eff '[TX] ()
+type TypeDBTX' a = (Member TX a, Member (Error CompileError) a) => Eff a ()
+type TypeDBTX = TypeDBTX' '[TX,Error CompileError]
 
-testTx :: TypeDBTX
+defaultQueryOpts :: Maybe Options
+defaultQueryOpts = Nothing
+
+testTx :: TypeDBTX 
 testTx = do
     openTx Transaction_TypeREAD Nothing networkLatency
     getThing (ThingID "sometid")
     deleteThing (ThingID "something")
+    query defaultQueryOpts $
+        ( match 
+        $ (Var "x") `isa` (Lbl "person") $ε)
+        `TypeDBQuery.get` [Var "x"]
     commit
+
+data CommitResult = CommitResult
+
+receiveCommitRes :: Maybe Transaction_Server -> Maybe CommitResult
+receiveCommitRes Nothing = Nothing
+receiveCommitRes (Just (Transaction_Server Nothing)) = Nothing
+receiveCommitRes (Just (Transaction_Server 
+                 (Just (Transaction_ServerServerRes
+                 (Transaction_Res txid Nothing))))) = Nothing
+receiveCommitRes (Just (Transaction_Server 
+                 (Just (Transaction_ServerServerRes
+                 (Transaction_Res txid 
+                 (Just (Transaction_ResResCommitRes
+                 (Transaction_Commit_Res)))))))) = Just CommitResult
+receiveCommitRes _ = Nothing
 
 testCallback :: Callback Transaction_Server Transaction_Client
 testCallback clientCall meta receive send done = do
     res <- receive :: IO (Either GRPCIOError (Maybe Transaction_Server))
+    putStrLn $ "received: " ++ show res
     case res of
       (Right (Just (Transaction_Server (Just (Transaction_ServerServerRes _))))) ->
           return ()
