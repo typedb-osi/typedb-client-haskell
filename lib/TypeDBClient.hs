@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -19,31 +20,24 @@ import Proto3.Suite.Types
 import Options
 import CoreDatabase
 import Session
-import qualified Query
-import qualified Logic
-import qualified Concept
 import Transaction
 import CoreService
-import Data.Text (Text, pack, unpack)
+import Data.Text (Text, pack)
 import Data.Text.Lazy (toStrict, fromStrict)
-import Control.Applicative
-import Control.Monad (void, MonadPlus(..))
 import Control.Monad.IO.Class
-import Control.Concurrent hiding (threadDelay, throwTo, ThreadId)
-import Control.Monad.Conc.Class hiding (throw, catch) 
+import Control.Monad.IO.Unlift
+import UnliftIO.Async
+import UnliftIO.Concurrent 
+import Control.Monad.Conc.Class hiding (throw, catch, throwTo, threadDelay)
 import Control.Monad.Catch
-import Control.Monad.STM.Class
 import Control.Exception.Base hiding (throwTo, catch,try)
-import Control.Exception.Safe (tryDeep)
-import qualified Data.ByteString as BS
 import Control.Monad.Trans.Reader
 import Network.GRPC.LowLevel.Op
 import Network.GRPC.LowLevel.Call
 import GHC.Exts
 import GHC.Int
-import Data.Vector (singleton)
-import Unsafe.Coerce
 import Types
+
 
 defaultConfig :: ClientConfig
 defaultConfig = ClientConfig { clientServerHost = "localhost"
@@ -131,22 +125,25 @@ getKeyspaces =
 
 
 networkLatency :: GHC.Int.Int32
-networkLatency = 1000
+networkLatency = 5000
 
 
                  
 performTx :: (MonadIO m, MonadConc m) => [Transaction_Req] ->  Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
-performTx tx func = typeDBBidiRequest
+performTx tx func = do
+    liftIO $ print "performing tx"
+    typeDBBidiRequest
                 typeDBTransaction
                 (\clientCall meta receive send done -> do 
                     -- TODO: send_res, res may be error
-                    send_res <- send $ Transaction_Client $ fromList 
+                    print tx
+                    print "sending request"
+                    _ <- send $ Transaction_Client $ fromList 
                             $ tx
                     --res <- unsafeFromRight <$> receive ::IO (Maybe Transaction_Server)
+                    print "sent"
                     func clientCall meta receive send done
                 )
-    where 
-        unsafeFromRight (Right a) = a
 
 
 
@@ -157,10 +154,10 @@ type Selector req res = TypeDB ClientRequest ClientResult
 typeDBNormalRequest :: MonadIO m => 
     Selector req res -> req -> (res -> a) -> TypeDBM m a
 typeDBNormalRequest select req convert = TypeDBM $ do
-    (TypeDBConfig config timeoutSeconds) <- ask
+    (TypeDBConfig config timeoutSeconds') <- ask
     liftIO $ withGRPCClient config $ \client -> do
         typeDBFunction <- select <$> typeDBClient client
-        res <- typeDBFunction (ClientNormalRequest req timeoutSeconds [])
+        res <- typeDBFunction (ClientNormalRequest req timeoutSeconds' [])
         case res of
             ClientNormalResponse 
               result 
@@ -171,10 +168,10 @@ typeDBNormalRequest select req convert = TypeDBM $ do
 typeDBNormalRequestE :: MonadIO m => 
     Selector req res -> req -> (res -> a) -> TypeDBM m (Either TypeDBError a)
 typeDBNormalRequestE select req convert = TypeDBM $ do
-    (TypeDBConfig config timeoutSeconds) <- ask
+    (TypeDBConfig config timeoutSeconds') <- ask
     liftIO $ withGRPCClient config $ \client -> do
         typeDBFunction <- select <$> typeDBClient client
-        res <- typeDBFunction (ClientNormalRequest req timeoutSeconds [])
+        res <- typeDBFunction (ClientNormalRequest req timeoutSeconds' [])
         case res of
             ClientNormalResponse 
               result 
@@ -192,11 +189,11 @@ type HandlerFunction req res = ClientCall -> MetadataMap
 typeDBBidiRequest :: (MonadIO m, MonadConc m) => 
     BidiSelector req res -> HandlerFunction req res -> TypeDBM m (StatusCode, StatusDetails)
 typeDBBidiRequest select handler = TypeDBM $ do
-    (TypeDBConfig config timeoutSeconds) <- ask
+    (TypeDBConfig config timeoutSeconds') <- ask
     liftIO $ withGRPCClient config $ \client -> do
         typeDBFunction <- select <$> typeDBClient client
         resE <- try $ typeDBFunction 
-                    (ClientBiDiRequest timeoutSeconds [] handler) :: IO (Either SomeException (ClientResult 'BiDiStreaming _))
+                    (ClientBiDiRequest timeoutSeconds' [] handler) :: IO (Either SomeException (ClientResult 'BiDiStreaming _))
         case resE of
           (Right (ClientBiDiResponse _meta _status _detail))
                                     -> return $ (_status, _detail)
@@ -206,10 +203,10 @@ typeDBBidiRequest select handler = TypeDBM $ do
 unsafetypeDBBidiRequestE :: (MonadIO m, MonadConc m) => 
     BidiSelector req res -> HandlerFunction req res -> TypeDBM m (Either TypeDBError (StatusCode, StatusDetails))
 unsafetypeDBBidiRequestE select handler = TypeDBM $ do
-    (TypeDBConfig config timeoutSeconds) <- ask
+    (TypeDBConfig config timeoutSeconds') <- ask
     liftIO $ withGRPCClient config $ \client -> do
         typeDBFunction <- select <$> typeDBClient client
-        res <- typeDBFunction (ClientBiDiRequest timeoutSeconds [] handler)
+        res <- typeDBFunction (ClientBiDiRequest timeoutSeconds' [] handler)
         case res of
             ClientBiDiResponse _meta _status _detail
                                     -> return $ Right $ (_status, _detail)
@@ -234,26 +231,41 @@ data SessionTimeout = SessionTimeout
     deriving Show
 instance Exception SessionTimeout
 
-withSession :: (MonadIO m, MonadConc m) 
+withSession :: (MonadUnliftIO m, MonadIO m, MonadConc m) 
             => Keyspace -> TypeDBM m a -> TypeDBM m a
 withSession keyspace m = do
     session <- openSession keyspace
-    
-    config <- ask'
-    pulseThread <- fork $ runWithErr
-                            (sendPulses session) 
-                            config
-                            (const $ return ())
-    res <- m
-    closeSession session
-    throwTo pulseThread SessionTimeout
-    return res
+    liftIO $ print $ "opened session " <> (getTypeDBSession session)
 
+    pulseSessionThread <- forkIO $ 
+                            catch (sendPulses session)
+                                  (\(a::SessionTimeout) -> return ())
+    res <- m
+    -- waitEitherCancel :: MonadUnliftIO m => Async a 
+    --                       -> Async b 
+    --                       -> m (Either a b) 
+    -- so the pattern match is safe because sendPulses never finishes first
+    {-res <- waitEitherCancel 
+                     pulseSessionThread
+                     action 
+    -}
+    throwTo pulseSessionThread SessionTimeout
+    closeSession session
+    liftIO $ print $ "closed session " <> (getTypeDBSession session)
+    return res
+    {-case res of
+      Left _ -> throwM $ TypeDBError "connection to the server severed; session unclosed"
+      Right res' -> do
+        closeSession session
+        liftIO $ print $ "closed session " <> (getTypeDBSession session)
+        return res'
+    -}
     where 
         sendPulses :: (MonadIO m, MonadConc m) => TypeDBSession -> TypeDBM m ()
-        sendPulses session = do
+        sendPulses !session = do 
             -- send pulse every 5 seconds after creation
-            liftIO $ threadDelay (5*10^6)
+            liftIO $ threadDelay (5*10^6) 
+            liftIO $ print "pulsing"
             pulseSession session
             sendPulses session
 

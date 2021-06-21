@@ -33,10 +33,14 @@ library
     , safe-exceptions
     , exceptions
     , concurrency
-    , freer-simple
+    , polysemy
+    , polysemy-plugin
     , random
     , template-haskell
     , split
+    , unliftio
+    , unliftio-core
+    , uuid
   exposed-modules:
     TypeDBClient
     TypeDBTransaction

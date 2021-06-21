@@ -1,4 +1,3 @@
-{-# -Wnounused-imports #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -9,16 +8,18 @@ import Data.Text
 import qualified Data.ByteString as BS
 import Control.Monad.Trans.Reader
 import Control.Monad.IO.Class
+import Control.Monad.IO.Unlift
 import Control.Monad.Conc.Class hiding (throw, catch) 
 import Control.Monad.Catch
 import Network.GRPC.LowLevel.Op
 import Network.GRPC.LowLevel.Call
-import GHC.Int (Int32, Int64)
+import GHC.Int (Int64)
 import qualified Concept
 import qualified Data.Text.Internal.Lazy
 
 newtype Keyspace = Keyspace { getKeyspace :: Text }
 newtype TypeDBSession = TypeDBSession { getTypeDBSession :: BS.ByteString }
+    deriving (Show)
 
 
 data TypeDBConfig = TypeDBConfig { clientConfig   :: ClientConfig
@@ -26,12 +27,14 @@ data TypeDBConfig = TypeDBConfig { clientConfig   :: ClientConfig
 
 newtype TypeDBM m a = TypeDBM { fromTypeDB :: ReaderT TypeDBConfig m a}
     deriving newtype ( Functor, Applicative, Monad, MonadThrow
-                     , MonadCatch, MonadMask, MonadIO, MonadConc)
+                     , MonadCatch, MonadMask, MonadIO, MonadConc
+                     , MonadUnliftIO)
 
 
 newtype TypeDBError = TypeDBError { getError :: Text }
-    deriving (Show, Exception)
+    deriving (Show)
 
+instance Exception TypeDBError
 
 type Callback a b = ClientCall
               -> MetadataMap

@@ -1,77 +1,87 @@
+{-# OPTIONS_GHC -fplugin=Polysemy.Plugin #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
-module TypeDBTransaction where
-import Prelude hiding (getStdGen)
-import Network.GRPC.HighLevel.Generated
+{-# LANGUAGE TemplateHaskell #-}
+module TypeDBTransaction (module GRPC, module TypeDBTransaction) where
+import Prelude 
+import Network.GRPC.HighLevel.Generated as GRPC
 import Proto3.Suite.Types
 import Options
-import CoreDatabase
-import Session
 import qualified Query
 import qualified Logic
 import qualified Concept
 import Transaction
-import Data.Text (Text, pack, unpack)
+import Data.Text (Text, unpack)
 import Data.Text.Encoding (encodeUtf8)
+import Data.UUID.V4
+import Data.UUID hiding (fromString)
 --import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Text.Internal.Lazy
 import Types
-import TypeDBClient (performTx, networkLatency)
+import TypeDBClient (performTx)
 import GHC.Exts (fromList, fromString)
-import GHC.Int (Int32, Int64)
+import GHC.Int (Int32)
 
-import Control.Monad.Freer
-import Control.Monad.Freer.State
-import Control.Monad.Freer.Error
+import Polysemy
+import Polysemy.State
+import Polysemy.Error
+import Polysemy.Internal (send)
 import System.Random
 import Control.Monad.IO.Class
-import Control.Monad.Conc.Class hiding (catch) 
+import Control.Monad.Conc.Class hiding (catch,throw) 
+import qualified Control.Monad.Conc.Class
 import Control.Exception (Exception(..))
 import TypeDBQuery
 
 data Sth a
 type RandomTxIdGen = StdGen
 
-data TX a where
-    Commit :: TX ()                                             -- done 
-    Rollback :: TX ()                                           -- done
-    Open :: Transaction_Type -> Maybe Options -> Int32 -> TX () -- done
-    Stream :: TX ()                                             -- done
-    QueryManager :: Maybe Options -> Maybe Query.QueryManager_ReqReq -> TX ()
-    ConceptManager :: Maybe Concept.ConceptManager_ReqReq -> TX () -- done
-    LogicManager :: Maybe Logic.LogicManager_ReqReq -> TX ()    -- done
-    Rule :: RuleLabel -> Maybe Logic.Rule_ReqReq -> TX ()           -- done
-    Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX () -- done
-    TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX ()  -- done
+data TX m a where
+    Commit :: TX m ()                                             -- done 
+    Rollback :: TX m ()                                           -- done
+    Open :: Transaction_Type -> Maybe Options -> Int32 -> TX m () -- done
+    Stream :: TX m ()                                             -- done
+    QueryManager :: Maybe Options -> Maybe Query.QueryManager_ReqReq -> TX m () -- done
+    ConceptManager :: Maybe Concept.ConceptManager_ReqReq -> TX m () -- done
+    LogicManager :: Maybe Logic.LogicManager_ReqReq -> TX m ()    -- done
+    Rule :: RuleLabel -> Maybe Logic.Rule_ReqReq -> TX m ()           -- done
+    TX_Type :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> TX m () -- done
+    TX_Thing :: ThingID -> Maybe Concept.Thing_ReqReq -> TX m ()  -- done
 
-commit :: Member TX a => Eff a ()
+
+--makeSem ''TX
+  
+commit :: Sem (TX ': a) ()
 commit = send Commit
 
-getMore :: Member TX a => Eff a ()
+getMore :: Member (TX) a => Sem a ()
 getMore = send Stream
 
 
-openTx :: Member TX a => Transaction_Type -> Maybe Options -> Int32 -> Eff a ()
+openTx :: Member (TX) a => Transaction_Type -> Maybe Options -> Int32 -> Sem a ()
 openTx t o i = send (Open t o i)
 
-rollback :: Member TX a => Eff a ()
+rollback :: Member (TX) a => Sem a ()
 rollback = send Rollback
 
-deleteThing :: Member TX a => ThingID -> Eff a ()
+deleteThing :: Member (TX) a => ThingID -> Sem a ()
 deleteThing t = send $ TX_Thing t $ Just 
               $ Concept.Thing_ReqReqThingDeleteReq
               $ Concept.Thing_Delete_Req
 
 
 
-thingHas :: Member TX a => ThingID  -> [ThingType] -> KeysOnly -> Eff a ()
+thingHas :: Member (TX) a => ThingID  -> [ThingType] -> KeysOnly -> Sem a ()
 thingHas t thingTypes keysOnly = send $ TX_Thing t $ Just
            $ Concept.Thing_ReqReqThingGetHasReq
            $ Concept.Thing_GetHas_Req 
@@ -96,87 +106,87 @@ toConceptThingType (ThingType
 
 
 toConceptThing :: Thing -> Concept.Thing
-toConceptThing (Thing (ThingID id)
-                      thingType
+toConceptThing (Thing (ThingID tid)
+                      thingType'
                       thingVal
                       isInferred)
-    = Concept.Thing (encodeUtf8 id)
-                    (toConceptThingType <$> thingType)
+    = Concept.Thing (encodeUtf8 tid)
+                    (toConceptThingType <$> thingType')
                     (toConceptThingVal <$> thingVal)
                     (isInferred==IsInferred)
 
-thingSet :: Member TX a => ThingID -> Thing -> Eff a ()
+thingSet :: Member (TX) a => ThingID -> Thing -> Sem a ()
 thingSet tid thing = send $ TX_Thing tid $ Just
            $ Concept.Thing_ReqReqThingSetHasReq
            $ Concept.Thing_SetHas_Req 
                 (Just $ toConceptThing thing)
 
-thingUnset :: Member TX a => ThingID -> Thing -> Eff a ()
+thingUnset :: Member (TX) a => ThingID -> Thing -> Sem a ()
 thingUnset tid thing = send $ TX_Thing tid $ Just
            $ Concept.Thing_ReqReqThingUnsetHasReq
            $ Concept.Thing_UnsetHas_Req 
                 (Just $ toConceptThing thing)
 
-thingGetRelations :: Member TX a => ThingID -> [ThingType] -> Eff a ()
+thingGetRelations :: Member (TX) a => ThingID -> [ThingType] -> Sem a ()
 thingGetRelations tid things = send $ TX_Thing tid $ Just
            $ Concept.Thing_ReqReqThingGetRelationsReq
            $ Concept.Thing_GetRelations_Req
                 (fromList $ map toConceptThingType things)
 
-thingGetPlaying :: Member TX a => ThingID -> Eff a ()
+thingGetPlaying :: Member (TX) a => ThingID -> Sem a ()
 thingGetPlaying tid = send $ TX_Thing tid $ Just
            $ Concept.Thing_ReqReqThingGetPlayingReq
            $ Concept.Thing_GetPlaying_Req 
 
 
-addPlayer :: Member TX a => ThingID -> Maybe ThingType -> Maybe Thing -> Eff a ()
-addPlayer tid thingType thing = send $ TX_Thing tid $ Just
+addPlayer :: Member (TX) a => ThingID -> Maybe ThingType -> Maybe Thing -> Sem a ()
+addPlayer tid thingType' thing = send $ TX_Thing tid $ Just
             $ Concept.Thing_ReqReqRelationAddPlayerReq
             $ Concept.Relation_AddPlayer_Req 
-                (toConceptThingType <$> thingType)
+                (toConceptThingType <$> thingType')
                 (toConceptThing <$> thing)
 
-removePlayer :: Member TX a => ThingID -> Maybe ThingType -> Maybe Thing -> Eff a ()
-removePlayer tid thingType thing = send $ TX_Thing tid $ Just
+removePlayer :: Member (TX) a => ThingID -> Maybe ThingType -> Maybe Thing -> Sem a ()
+removePlayer tid thingType' thing = send $ TX_Thing tid $ Just
             $ Concept.Thing_ReqReqRelationRemovePlayerReq
             $ Concept.Relation_RemovePlayer_Req 
-                (toConceptThingType <$> thingType)
+                (toConceptThingType <$> thingType')
                 (toConceptThing <$> thing)
 
 
-getPlayers :: Member TX a => ThingID -> [ThingType] -> Eff a ()
+getPlayers :: Member (TX) a => ThingID -> [ThingType] -> Sem a ()
 getPlayers tid roleTypes = send $ TX_Thing tid $ Just
            $ Concept.Thing_ReqReqRelationGetPlayersReq
            $ Concept.Relation_GetPlayers_Req
                     (fromList $ map toConceptThingType roleTypes)
 
-getPlayersByRoleType :: Member TX a => ThingID -> Eff a ()
+getPlayersByRoleType :: Member (TX) a => ThingID -> Sem a ()
 getPlayersByRoleType tid = send $ TX_Thing tid $ Just
            $ Concept.Thing_ReqReqRelationGetPlayersByRoleTypeReq
            $ Concept.Relation_GetPlayersByRoleType_Req
 
-getRelating :: Member TX a => ThingID -> Eff a ()
+getRelating :: Member (TX) a => ThingID -> Sem a ()
 getRelating tid = send $ TX_Thing tid $ Just
            $ Concept.Thing_ReqReqRelationGetRelatingReq
            $ Concept.Relation_GetRelating_Req
 
 type AttributeOwnersFilter = ThingType
 
-getAttributeOwners :: Member TX a => ThingID -> Maybe AttributeOwnersFilter -> Eff a ()
-getAttributeOwners tid filter = send $ TX_Thing tid $ Just
+getAttributeOwners :: Member (TX) a => ThingID -> Maybe AttributeOwnersFilter -> Sem a ()
+getAttributeOwners tid filter' = send $ TX_Thing tid $ Just
            $ Concept.Thing_ReqReqAttributeGetOwnersReq
            $ Concept.Attribute_GetOwners_Req
            $ Concept.Attribute_GetOwners_ReqFilterThingType 
-                    <$> toConceptThingType <$> filter
+                    <$> toConceptThingType <$> filter'
 
-deleteType :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-deleteType tl ts = send $ Type tl ts $ Just
+deleteType :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+deleteType tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqTypeDeleteReq
            $ Concept.Type_Delete_Req
 
 
-setTypeLabel :: Member TX a => TypeLabel -> TypeScope -> TypeLabel -> Eff a ()
-setTypeLabel tl ts newLabel = send $ Type tl ts $ Just
+setTypeLabel :: Member (TX) a => TypeLabel -> TypeScope -> TypeLabel -> Sem a ()
+setTypeLabel tl ts newLabel = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqTypeSetLabelReq
            $ Concept.Type_SetLabel_Req 
                 (toConceptTypeLabel newLabel)
@@ -185,55 +195,55 @@ toConceptTypeLabel :: TypeLabel -> Data.Text.Internal.Lazy.Text
 toConceptTypeLabel = toInternalLazyText . fromTypeLabel
 
 
-isAbstract :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-isAbstract tl ts = send $ Type tl ts $ Just
+isAbstract :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+isAbstract tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqTypeIsAbstractReq
            $ Concept.Type_IsAbstract_Req
 
-getSupertype :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-getSupertype tl ts = send $ Type tl ts $ Just
+getSupertype :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+getSupertype tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqTypeGetSupertypesReq
            $ Concept.Type_GetSupertypes_Req
 
-getSupertypes :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-getSupertypes tl ts = send $ Type tl ts $ Just
+getSupertypes :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+getSupertypes tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqTypeGetSupertypeReq
            $ Concept.Type_GetSupertype_Req
 
-setSupertype :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Eff a ()
-setSupertype tl ts mt = send $ Type tl ts $ Just
+setSupertype :: Member (TX) a => TypeLabel -> TypeScope -> Maybe ThingType -> Sem a ()
+setSupertype tl ts mt = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqTypeSetSupertypeReq
            $ Concept.Type_SetSupertype_Req
                 (toConceptThingType <$> mt)
 
 
-getRelationTypes :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-getRelationTypes tl ts = send $ Type tl ts $ Just
+getRelationTypes :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+getRelationTypes tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqRoleTypeGetRelationTypesReq
            $ Concept.RoleType_GetRelationTypes_Req
 
-getRoleTypePlayers :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-getRoleTypePlayers tl ts = send $ Type tl ts $ Just
+getRoleTypePlayers :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+getRoleTypePlayers tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqRoleTypeGetPlayersReq
            $ Concept.RoleType_GetPlayers_Req
 
-getInstances :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-getInstances tl ts = send $ Type tl ts $ Just
+getInstances :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+getInstances tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeGetInstancesReq
            $ Concept.ThingType_GetInstances_Req
 
-setAbstract :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-setAbstract tl ts = send $ Type tl ts $ Just
+setAbstract :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+setAbstract tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeSetAbstractReq
            $ Concept.ThingType_SetAbstract_Req
 
-unsetAbstract :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-unsetAbstract tl ts = send $ Type tl ts $ Just
+unsetAbstract :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+unsetAbstract tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeUnsetAbstractReq
            $ Concept.ThingType_UnsetAbstract_Req
 
-getOwns :: Member TX a => TypeLabel -> TypeScope -> Maybe AttributeValueType -> KeysOnly -> Eff a ()
-getOwns tl ts avt keysOnly = send $ Type tl ts $ Just
+getOwns :: Member (TX) a => TypeLabel -> TypeScope -> Maybe AttributeValueType -> KeysOnly -> Sem a ()
+getOwns tl ts avt keysOnly = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeGetOwnsReq
            $ Concept.ThingType_GetOwns_Req
                 ((Concept.ThingType_GetOwns_ReqFilterValueType . Enumerated . Right . toConceptAttributeValueType) <$> avt)
@@ -256,8 +266,8 @@ toConceptAttributeValue (AV_Double d)   = Concept.Attribute_Value $ Just $ Conce
 toConceptAttributeValue (AV_DateTime d) = Concept.Attribute_Value $ Just $ Concept.Attribute_ValueValueDateTime d
 
 
-setOwns :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Maybe ThingType -> KeysOnly -> Eff a ()
-setOwns tl ts avt t keysOnly = send $ Type tl ts $ Just
+setOwns :: Member (TX) a => TypeLabel -> TypeScope -> Maybe ThingType -> Maybe ThingType -> KeysOnly -> Sem a ()
+setOwns tl ts avt t keysOnly = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeSetOwnsReq
            $ Concept.ThingType_SetOwns_Req
                 (toConceptThingType <$> avt)
@@ -265,21 +275,21 @@ setOwns tl ts avt t keysOnly = send $ Type tl ts $ Just
                     . toConceptThingType <$> t) 
                 (keysOnly == KeysOnly)
 
-unsetOwns :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Eff a ()
-unsetOwns tl ts tt  = send $ Type tl ts $ Just
+unsetOwns :: Member (TX) a => TypeLabel -> TypeScope -> Maybe ThingType -> Sem a ()
+unsetOwns tl ts tt  = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeUnsetOwnsReq
            $ Concept.ThingType_UnsetOwns_Req
                 (toConceptThingType <$> tt)
 
 
-getPlays :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-getPlays tl ts = send $ Type tl ts $ Just
+getPlays :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+getPlays tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeGetPlaysReq
            $ Concept.ThingType_GetPlays_Req
 
 
-setPlays :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Maybe ThingType -> Eff a ()
-setPlays tl ts mt mo = send $ Type tl ts $ Just
+setPlays :: Member (TX) a => TypeLabel -> TypeScope -> Maybe ThingType -> Maybe ThingType -> Sem a ()
+setPlays tl ts mt mo = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeSetPlaysReq
            $ Concept.ThingType_SetPlays_Req
                 (toConceptThingType <$> mt)
@@ -287,92 +297,92 @@ setPlays tl ts mt mo = send $ Type tl ts $ Just
                     . toConceptThingType) <$> mo)
 
 
-unsetPlays :: Member TX a => TypeLabel -> TypeScope -> Maybe ThingType -> Eff a ()
-unsetPlays tl ts mt = send $ Type tl ts $ Just
+unsetPlays :: Member (TX) a => TypeLabel -> TypeScope -> Maybe ThingType -> Sem a ()
+unsetPlays tl ts mt = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqThingTypeUnsetPlaysReq
            $ Concept.ThingType_UnsetPlays_Req
                 (toConceptThingType <$> mt)
 
 
-createEntityType :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-createEntityType tl ts = send $ Type tl ts $ Just
+createEntityType :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+createEntityType tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqEntityTypeCreateReq
            $ Concept.EntityType_Create_Req
 
 
 
-createRelationType :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-createRelationType tl ts = send $ Type tl ts $ Just
+createRelationType :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+createRelationType tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqRelationTypeCreateReq
            $ Concept.RelationType_Create_Req
 
 
-getRelatesFor :: Member TX a => TypeLabel -> TypeScope -> RoleLabel -> Eff a ()
-getRelatesFor tl ts rl = send $ Type tl ts $ Just
+getRelatesFor :: Member (TX) a => TypeLabel -> TypeScope -> RoleLabel -> Sem a ()
+getRelatesFor tl ts rl = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqRelationTypeGetRelatesForRoleLabelReq
            $ Concept.RelationType_GetRelatesForRoleLabel_Req
                 (toInternalLazyText . fromRoleLabel $ rl)
 
-getRelates :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-getRelates tl ts = send $ Type tl ts $ Just
+getRelates :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+getRelates tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqRelationTypeGetRelatesReq
            $ Concept.RelationType_GetRelates_Req
 
 
-setRelates :: Member TX a => TypeLabel -> TypeScope -> RelationLabel -> Maybe RelationLabel -> Eff a ()
-setRelates tl ts rl mrl = send $ Type tl ts $ Just
+setRelates :: Member (TX) a => TypeLabel -> TypeScope -> RelationLabel -> Maybe RelationLabel -> Sem a ()
+setRelates tl ts rl mrl = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqRelationTypeSetRelatesReq
            $ Concept.RelationType_SetRelates_Req
                 (toInternalLazyText . fromRelationLabel $ rl)
                 (Concept.RelationType_SetRelates_ReqOverriddenOverriddenLabel 
                    . toInternalLazyText . fromRelationLabel <$> mrl)
 
-unsetRelates :: Member TX a => TypeLabel -> TypeScope -> RelationLabel -> Eff a ()
-unsetRelates tl ts rl = send $ Type tl ts $ Just
+unsetRelates :: Member (TX) a => TypeLabel -> TypeScope -> RelationLabel -> Sem a ()
+unsetRelates tl ts rl = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqRelationTypeUnsetRelatesReq
            $ Concept.RelationType_UnsetRelates_Req
                 (toInternalLazyText . fromRelationLabel $ rl)
 
 
-putAttributeType :: Member TX a => TypeLabel -> TypeScope -> Maybe AttributeValue -> Eff a ()
-putAttributeType tl ts mav = send $ Type tl ts $ Just
+putAttributeType :: Member (TX) a => TypeLabel -> TypeScope -> Maybe AttributeValue -> Sem a ()
+putAttributeType tl ts mav = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqAttributeTypePutReq
            $ Concept.AttributeType_Put_Req
                 (toConceptAttributeValue <$> mav)
 
-getAttributeType :: Member TX a => TypeLabel -> TypeScope -> Maybe AttributeValue -> Eff a ()
-getAttributeType tl ts mav = send $ Type tl ts $ Just
+getAttributeType :: Member (TX) a => TypeLabel -> TypeScope -> Maybe AttributeValue -> Sem a ()
+getAttributeType tl ts mav = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqAttributeTypeGetReq
            $ Concept.AttributeType_Get_Req
                 (toConceptAttributeValue <$> mav)
                 
-getAttributeTypeRegex :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-getAttributeTypeRegex tl ts = send $ Type tl ts $ Just
+getAttributeTypeRegex :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+getAttributeTypeRegex tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqAttributeTypeGetRegexReq
            $ Concept.AttributeType_GetRegex_Req
 
 
-setAttributeTypeRegex :: Member TX a => TypeLabel -> TypeScope -> Eff a ()
-setAttributeTypeRegex tl ts = send $ Type tl ts $ Just
+setAttributeTypeRegex :: Member (TX) a => TypeLabel -> TypeScope -> Sem a ()
+setAttributeTypeRegex tl ts = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqAttributeTypeGetRegexReq
            $ Concept.AttributeType_GetRegex_Req
 
 
-getAttributeTypeOwners :: Member TX a => TypeLabel -> TypeScope -> KeysOnly -> Eff a ()
-getAttributeTypeOwners tl ts keysOnly = send $ Type tl ts $ Just
+getAttributeTypeOwners :: Member (TX) a => TypeLabel -> TypeScope -> KeysOnly -> Sem a ()
+getAttributeTypeOwners tl ts keysOnly = send $ TX_Type tl ts $ Just
            $ Concept.Type_ReqReqAttributeTypeGetOwnersReq
            $ Concept.AttributeType_GetOwners_Req
                 (keysOnly == KeysOnly)
 
 
-getThingType :: Member TX a => TypeLabel -> Eff a ()
+getThingType :: Member (TX) a => TypeLabel -> Sem a ()
 getThingType tl = send $ ConceptManager $ Just 
             $ Concept.ConceptManager_ReqReqGetThingTypeReq
             $ Concept.ConceptManager_GetThingType_Req
                 (toConceptTypeLabel tl)
 
 
-getThing :: Member TX a => ThingID -> Eff a ()
+getThing :: Member (TX) a => ThingID -> Sem a ()
 getThing tid = send $ ConceptManager $ Just 
             $ Concept.ConceptManager_ReqReqGetThingReq
             $ Concept.ConceptManager_GetThing_Req
@@ -382,20 +392,20 @@ toConceptThingID :: ThingID -> BS.ByteString
 toConceptThingID = encodeUtf8 . fromThingID
 
 
-conceptPutEntityType :: Member TX a => TypeLabel -> Eff a ()
+conceptPutEntityType :: Member (TX) a => TypeLabel -> Sem a ()
 conceptPutEntityType tid = send $ ConceptManager $ Just 
             $ Concept.ConceptManager_ReqReqPutEntityTypeReq
             $ Concept.ConceptManager_PutEntityType_Req
                 (toConceptTypeLabel tid)
 
-conceptPutAttributeType :: Member TX a => TypeLabel -> AttributeValueType -> Eff a ()
+conceptPutAttributeType :: Member (TX) a => TypeLabel -> AttributeValueType -> Sem a ()
 conceptPutAttributeType tid avt = send $ ConceptManager $ Just 
             $ Concept.ConceptManager_ReqReqPutAttributeTypeReq
             $ Concept.ConceptManager_PutAttributeType_Req
                 (toConceptTypeLabel tid)
                 (Enumerated . Right $ toConceptAttributeValueType avt)
 
-conceptPutRelationType :: Member TX a => TypeLabel -> Eff a ()
+conceptPutRelationType :: Member (TX) a => TypeLabel -> Sem a ()
 conceptPutRelationType tid = send $ ConceptManager $ Just 
             $ Concept.ConceptManager_ReqReqPutRelationTypeReq
             $ Concept.ConceptManager_PutRelationType_Req
@@ -407,24 +417,24 @@ conceptPutRelationType tid = send $ ConceptManager $ Just
 toLogicRuleLabel :: RuleLabel -> Data.Text.Internal.Lazy.Text
 toLogicRuleLabel = toInternalLazyText . fromRuleLabel
 
-deleteRule :: Member TX a => RuleLabel -> Eff a ()
+deleteRule :: Member (TX) a => RuleLabel -> Sem a ()
 deleteRule rl = send $ Rule rl $ Just
             $ Logic.Rule_ReqReqRuleDeleteReq
             $ Logic.Rule_Delete_Req
 
-setRuleLabel :: Member TX a => RuleLabel -> RuleLabel -> Eff a ()
+setRuleLabel :: Member (TX) a => RuleLabel -> RuleLabel -> Sem a ()
 setRuleLabel rl lbl = send $ Rule rl $ Just
             $ Logic.Rule_ReqReqRuleSetLabelReq
             $ Logic.Rule_SetLabel_Req
                 (toLogicRuleLabel lbl)
 
-getRule :: Member TX a => RuleLabel -> Eff a ()
+getRule :: Member (TX) a => RuleLabel -> Sem a ()
 getRule lbl = send $ LogicManager $ Just
             $ Logic.LogicManager_ReqReqGetRuleReq
             $ Logic.LogicManager_GetRule_Req
                 (toLogicRuleLabel lbl)
 
-putRule :: Member TX a => RuleLabel -> When -> Then -> Eff a ()
+putRule :: Member (TX) a => RuleLabel -> When -> Then -> Sem a ()
 putRule lbl w t = send $ LogicManager $ Just
             $ Logic.LogicManager_ReqReqPutRuleReq
             $ Logic.LogicManager_PutRule_Req
@@ -438,13 +448,13 @@ toLogicWhen = toInternalLazyText . fromWhen
 toLogicThen :: Then -> Data.Text.Internal.Lazy.Text
 toLogicThen = toInternalLazyText . fromThen
 
-getRules :: Member TX a => Eff a ()
+getRules :: Member (TX) a => Sem a ()
 getRules = send $ LogicManager $ Just
             $ Logic.LogicManager_ReqReqGetRulesReq
             $ Logic.LogicManager_GetRules_Req
 
 
-query :: (Member TX b, Member (Error CompileError) b) => Maybe Options -> Query a -> Eff b ()
+query :: (Member (Error QueryError) b) => Maybe Options -> Query a -> Sem (TX ': b) ()
 query opts q = case (getQueryType q) of
             [QT_DEFINE] -> sendQuery
                                 $ Query.QueryManager_ReqReqDefineReq
@@ -482,11 +492,17 @@ query opts q = case (getQueryType q) of
                                 $ Query.QueryManager_ReqReqUpdateReq
                                 $ Query.QueryManager_Update_Req
                                 $ cq
-            [QT_EXPLAIN] -> sendQuery
+            [QT_EXPLAIN] -> throw 
+                                $ UnimplementedException
+                                $ Unimplemented
+                                "the explain query is not supported yet"
+                                {-sendQuery
                                 $ Query.QueryManager_ReqReqExplainReq
                                 $ Query.QueryManager_Explain_Req
-                                $ 0 -- TODO cq
-            a -> throwError (QueryTypeUndefined a cq_norm)
+                                $ 0 -- TODO cq-}
+            a -> throw 
+                    $ QueryTypeUndefinedException
+                    $ QueryTypeUndefined a cq_norm
 
 
     where
@@ -500,69 +516,88 @@ query opts q = case (getQueryType q) of
 fromThingID' :: ThingID -> BS.ByteString
 fromThingID' = encodeUtf8 . fromThingID
 
-data CompilerState = CS { randomGen :: RandomTxIdGen
-                        , program :: [Opts -> Transaction_Req] }
+data CompilerState = CS { program :: [Opts -> Transaction_Req] }
 
-data CompileError = QueryTypeUndefined { qt :: [QueryType]
-                                       , queryText :: Text }
+
+data QueryError = QueryTypeUndefinedException QueryTypeUndefined
+                | UnimplementedException Unimplemented
+    deriving (Show)
+
+instance Exception QueryError
+
+data Unimplemented = Unimplemented { unimplementedText :: Text }
+    deriving (Show)
+
+
+data QueryTypeUndefined = QueryTypeUndefined { qt :: [QueryType]
+                                             , queryText :: Text }
                 deriving (Show)
 
-instance Exception CompileError where
 
-compileTx :: RandomTxIdGen -> Eff '[TX, Error CompileError] a -> Either CompileError [Opts -> Transaction_Req]
-compileTx gen req = reverse . program . snd 
-                  <$> run (runError (runState (CS gen []) (reinterpret interpret' req)))
+compileTx :: TypeDBTX -> IO (Either QueryError [Opts -> Transaction_Req])
+compileTx req = do -- ((reverse . program . fst) <$>)
+              ioDischarged <- ( runM @IO
+                              . runError @QueryError
+                              . runState (CS [])
+                              . interpret'
+                              $ req) 
+              return $ (reverse . program . fst) <$> ioDischarged
+                  {-  ioDischarged <- (reinterpret interpret' req)
+                return $ reverse . program . snd 
+                              <$> run (runError (runState (CS []) ioDischarged))
+                -}
   where
-    interpret' :: TX v -> Eff '[State CompilerState,Error CompileError] v
-    interpret' (Open t o i) = withRandom (openTx_ t o i)
-    interpret' (Commit) = withRandom (commitTx_)
-    interpret' (Rollback) = withRandom (rollbackTx_)
-    interpret' (TX_Thing a req) = withRandom (thingTx_ a req)
-    interpret' (Type lbl scope req) = withRandom (typeTx_ lbl scope req)
-    interpret' (ConceptManager req) = withRandom (conceptTx_ req)
-    interpret' (Stream) = withRandom (moreOrDoneStreamTx_)
-    interpret' (Rule lbl req) = withRandom (ruleTx_ lbl req)
-    interpret' (LogicManager req) = withRandom (logicManagerTx_ req)
-    interpret' (QueryManager opts req) = withRandom (queryManagerTx_ opts req)
+    interpret' :: Members '[State CompilerState, Error QueryError, Embed IO] a 
+               => Sem (TX ': a) () -> Sem a ()
+    interpret' = interpret $ \case
+        (Open t o i)             -> withRandom (openTx_ t o i)
+        (Commit)                 -> withRandom (commitTx_)
+        (Rollback)               -> withRandom (rollbackTx_)
+        (TX_Thing a req')        -> withRandom (thingTx_ a req')
+        (TX_Type lbl scope req') -> withRandom (typeTx_ lbl scope req')
+        (ConceptManager req')    -> withRandom (conceptTx_ req')
+        (Stream)                 -> withRandom (moreOrDoneStreamTx_)
+        (Rule lbl req')          -> withRandom (ruleTx_ lbl req')
+        (LogicManager req')      -> withRandom (logicManagerTx_ req')
+        (QueryManager opts req') -> withRandom (queryManagerTx_ opts req')
     
-
 
 runTxDefault :: (MonadIO m, MonadConc m) => TypeDBTX -> Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
 runTxDefault tx callback = runTxWith tx [] callback
 
 
 
-runTxWithE :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBM m (Either CompileError (StatusCode, StatusDetails))
+runTxWithE :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBM m (Either QueryError (StatusCode, StatusDetails))
 runTxWithE tx opts callback = do
-    gen <- liftIO $ newStdGen 
-    let compiled = compileTx gen tx
+    compiled <- liftIO $ compileTx tx
     case compiled of
       Left err -> return $ Left err
-      Right comp -> Right <$> performTx (map ($opts) comp) callback
+      Right comp -> Right <$> performTx (map ($ opts) comp) callback
 
 runTxWith :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
 runTxWith tx opts callback = do
-    gen <- liftIO $ newStdGen 
-    let compiled = compileTx gen tx
+    compiled <- liftIO $ compileTx tx
     case compiled of
-      Left err -> throw err
-      Right comp -> performTx (map ($opts) comp) callback
+      Left err -> Control.Monad.Conc.Class.throw err
+      Right comp -> do 
+        performTx (map ($ opts) comp) callback
 
 
-withRandom :: Member (State CompilerState) a => (String -> Opts -> Transaction_Req) -> Eff a ()
-withRandom a = do
-    g <- gets randomGen
-    let r = randomRs ('a','z') g
-        (_:: Int,g') = random g  
-    modify (\s -> s { randomGen = g', program = (a r):program s })
+withRandom :: Members '[State CompilerState, Embed IO]  a => (UUID -> Opts -> Transaction_Req) -> Sem a ()
+withRandom f = do
+    uuid <- liftIO nextRandom
+    modify (\s -> s { program = (f uuid):program s })
 
 
-type TypeDBTX' a = (Member TX a, Member (Error CompileError) a) => Eff a ()
-type TypeDBTX = TypeDBTX' '[TX,Error CompileError]
+--type TypeDBTX' b = Members '[TX, Error QueryError] b => Sem b ()
+type TypeDBTX = 
+    forall m. Members '[State CompilerState, Error QueryError, Embed IO] m 
+      => Sem (TX ': m) ()
 
 defaultQueryOpts :: Maybe Options
 defaultQueryOpts = Nothing
 
+    {-
 testTx :: TypeDBTX 
 testTx = do
     openTx Transaction_TypeREAD Nothing networkLatency
@@ -573,6 +608,7 @@ testTx = do
         $ (Var "x") `isa` (Lbl "person") $ε)
         `TypeDBQuery.get` [Var "x"]
     commit
+-}
 
 data CommitResult = CommitResult
 
@@ -581,14 +617,15 @@ receiveCommitRes Nothing = Nothing
 receiveCommitRes (Just (Transaction_Server Nothing)) = Nothing
 receiveCommitRes (Just (Transaction_Server 
                  (Just (Transaction_ServerServerRes
-                 (Transaction_Res txid Nothing))))) = Nothing
+                 (Transaction_Res _ Nothing))))) = Nothing
 receiveCommitRes (Just (Transaction_Server 
                  (Just (Transaction_ServerServerRes
-                 (Transaction_Res txid 
+                 (Transaction_Res _ 
                  (Just (Transaction_ResResCommitRes
                  (Transaction_Commit_Res)))))))) = Just CommitResult
 receiveCommitRes _ = Nothing
 
+    {-
 testCallback :: Callback Transaction_Server Transaction_Client
 testCallback clientCall meta receive send done = do
     res <- receive :: IO (Either GRPCIOError (Maybe Transaction_Server))
@@ -596,7 +633,7 @@ testCallback clientCall meta receive send done = do
     case res of
       (Right (Just (Transaction_Server (Just (Transaction_ServerServerRes _))))) ->
           return ()
-      _ -> testCallback clientCall meta receive send done
+      _ -> testCallback clientCall meta receive send done-}
     {-
     performTx $ map ($opts)  
                   $ [ openTx Transaction_TypeREAD Nothing networkLatency
@@ -604,44 +641,43 @@ testCallback clientCall meta receive send done = do
     where opts = []
 -}
 
-toTx :: (String -> Opts -> Transaction_ReqReq -> Transaction_Req)
-toTx txid opts a = Transaction_Req (BS.pack txid) (fromList opts) (Just a)
+toTx :: (UUID -> Opts -> Transaction_ReqReq -> Transaction_Req)
+toTx txid opts a = Transaction_Req (toASCIIBytes txid) (fromList opts) (Just a)
 
-moreOrDoneStreamTx_ :: String -> Opts -> Transaction_Req
+moreOrDoneStreamTx_ :: UUID -> Opts -> Transaction_Req
 moreOrDoneStreamTx_ txid opts = toTx txid opts $ Transaction_ReqReqStreamReq Transaction_Stream_Req
 
-commitTx_ :: String -> Opts -> Transaction_Req
+commitTx_ :: UUID -> Opts -> Transaction_Req
 commitTx_ txid opts = toTx txid opts $ Transaction_ReqReqCommitReq Transaction_Commit_Req
 
-rollbackTx_ :: String -> Opts -> Transaction_Req
+rollbackTx_ :: UUID -> Opts -> Transaction_Req
 rollbackTx_ txid opts = toTx txid opts $ Transaction_ReqReqRollbackReq Transaction_Rollback_Req
 
-type Metadata = String -> Opts
-thingTx_ :: ThingID -> Maybe Concept.Thing_ReqReq ->  String -> Opts -> Transaction_Req
+thingTx_ :: ThingID -> Maybe Concept.Thing_ReqReq ->  UUID -> Opts -> Transaction_Req
 thingTx_ tid mthingReq txid opts = toTx txid opts $ Transaction_ReqReqThingReq $ Concept.Thing_Req (fromThingID' tid) mthingReq
 
-logicManagerTx_ :: Maybe Logic.LogicManager_ReqReq -> String -> Opts -> Transaction_Req
+logicManagerTx_ :: Maybe Logic.LogicManager_ReqReq -> UUID -> Opts -> Transaction_Req
 logicManagerTx_ logicManagerReq txid opts = toTx txid opts 
         $ Transaction_ReqReqLogicManagerReq 
         $ Logic.LogicManager_Req logicManagerReq
 
-conceptTx_ :: Maybe Concept.ConceptManager_ReqReq -> String -> Opts -> Transaction_Req
+conceptTx_ :: Maybe Concept.ConceptManager_ReqReq -> UUID -> Opts -> Transaction_Req
 conceptTx_ conceptReq txid opts = toTx txid opts $ Transaction_ReqReqConceptManagerReq $ Concept.ConceptManager_Req conceptReq
 
-ruleTx_ :: RuleLabel -> Maybe Logic.Rule_ReqReq -> String -> Opts -> Transaction_Req
+ruleTx_ :: RuleLabel -> Maybe Logic.Rule_ReqReq -> UUID -> Opts -> Transaction_Req
 ruleTx_ ruleLabel ruleReq txid opts = toTx txid opts 
     $ Transaction_ReqReqRuleReq $ Logic.Rule_Req 
         (toLogicRuleLabel ruleLabel)
         ruleReq
 
-queryManagerTx_ :: Maybe Options -> Maybe Query.QueryManager_ReqReq -> String -> Opts -> Transaction_Req
+queryManagerTx_ :: Maybe Options -> Maybe Query.QueryManager_ReqReq -> UUID -> Opts -> Transaction_Req
 queryManagerTx_ mopts mQReq txid opts = toTx txid opts 
         $ Transaction_ReqReqQueryManagerReq
         $ Query.QueryManager_Req 
             (mopts)
             (mQReq)
 
-typeTx_ :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> String -> Opts -> Transaction_Req 
+typeTx_ :: TypeLabel -> TypeScope -> Maybe Concept.Type_ReqReq -> UUID -> Opts -> Transaction_Req 
 typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqTypeReq 
                   $ Concept.Type_Req 
                         (toInternalLazyText $ fromTypeLabel label)
@@ -650,10 +686,10 @@ typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqType
                 
 
 openTx_ :: Transaction_Type
-        -> Maybe Options -> Int32 -> String -> Opts -> Transaction_Req
+        -> Maybe Options -> Int32 -> UUID -> Opts -> Transaction_Req
 openTx_ txType opts lat txid txopts = toTx txid txopts $ Transaction_ReqReqOpenReq 
        $ Transaction_Open_Req 
-            (BS.pack txid)
+            (toASCIIBytes txid)
             (Enumerated $ Right txType)
             opts
             lat
@@ -674,4 +710,3 @@ toConceptThingVal (AV_DateTime dt)
 
 toInternalLazyText :: Text -> Data.Text.Internal.Lazy.Text
 toInternalLazyText t = fromString $ unpack t
-
