@@ -10,8 +10,6 @@ import Transaction
 import TypeDBTransaction
 import Control.Monad.Catch
 
---import Control.Concurrent (threadDelay, forkIO, killThread)
-
 main :: IO ()
 main = do 
     res <- catch 

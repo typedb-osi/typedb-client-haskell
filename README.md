@@ -23,8 +23,18 @@ To get a development environment use
  ```
  
  ## Status
- Right now the protocol specification compiles and there are methods for connecting
- to a grakn server and run an empty transaction on it.
+
+the haskell client successfully performed its' first action:
+- querying the available DBs,
+- creating a new one
+- initializing it with a schema 
+- committing the whole thing
+- closing the connection
+
+query DSL compiles to proper query strings
+
+still a long road to go; but nevertheless a small victory ^^
+
  *Beware:* Currently, the core code is messy, there is no testing and there are
  still design choices planned that are subject to change if I see fit. 
  Enter at own risk ;)
