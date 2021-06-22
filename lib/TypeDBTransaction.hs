@@ -534,8 +534,8 @@ data QueryTypeUndefined = QueryTypeUndefined { qt :: [QueryType]
                 deriving (Show)
 
 
-compileTx :: TypeDBTX -> IO (Either QueryError [Opts -> Transaction_Req])
-compileTx req = do -- ((reverse . program . fst) <$>)
+compileTxFor :: TypeDBTX -> TypeDBSession -> IO (Either QueryError [Opts -> Transaction_Req])
+compileTxFor req session_id = do -- ((reverse . program . fst) <$>)
               ioDischarged <- ( runM @IO
                               . runError @QueryError
                               . runState (CS [])
@@ -550,7 +550,7 @@ compileTx req = do -- ((reverse . program . fst) <$>)
     interpret' :: Members '[State CompilerState, Error QueryError, Embed IO] a 
                => Sem (TX ': a) () -> Sem a ()
     interpret' = interpret $ \case
-        (Open t o i)             -> withRandom (openTx_ t o i)
+        (Open t o i)             -> withRandom (openTx_ t o i session_id)
         (Commit)                 -> withRandom (commitTx_)
         (Rollback)               -> withRandom (rollbackTx_)
         (TX_Thing a req')        -> withRandom (thingTx_ a req')
@@ -562,21 +562,21 @@ compileTx req = do -- ((reverse . program . fst) <$>)
         (QueryManager opts req') -> withRandom (queryManagerTx_ opts req')
     
 
-runTxDefault :: (MonadIO m, MonadConc m) => TypeDBTX -> Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
-runTxDefault tx callback = runTxWith tx [] callback
+runTxDefault :: (MonadIO m, MonadConc m) => TypeDBTX -> Callback Transaction_Server Transaction_Client -> TypeDBSession -> TypeDBM m (StatusCode, StatusDetails)
+runTxDefault tx callback session_id = runTxWith tx [] callback session_id
 
 
 
-runTxWithE :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBM m (Either QueryError (StatusCode, StatusDetails))
-runTxWithE tx opts callback = do
-    compiled <- liftIO $ compileTx tx
+runTxWithE :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBSession -> TypeDBM m (Either QueryError (StatusCode, StatusDetails))
+runTxWithE tx opts callback session_id = do
+    compiled <- liftIO $ tx `compileTxFor` session_id
     case compiled of
       Left err -> return $ Left err
       Right comp -> Right <$> performTx (map ($ opts) comp) callback
 
-runTxWith :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBM m (StatusCode, StatusDetails)
-runTxWith tx opts callback = do
-    compiled <- liftIO $ compileTx tx
+runTxWith :: (MonadIO m, MonadConc m) => TypeDBTX -> Opts -> Callback Transaction_Server Transaction_Client -> TypeDBSession -> TypeDBM m (StatusCode, StatusDetails)
+runTxWith tx opts callback session_id = do
+    compiled <- liftIO $ tx `compileTxFor` session_id
     case compiled of
       Left err -> Control.Monad.Conc.Class.throw err
       Right comp -> do 
@@ -686,10 +686,10 @@ typeTx_ label scope mTypeReq txid opts = toTx txid opts $ Transaction_ReqReqType
                 
 
 openTx_ :: Transaction_Type
-        -> Maybe Options -> Int32 -> UUID -> Opts -> Transaction_Req
-openTx_ txType opts lat txid txopts = toTx txid txopts $ Transaction_ReqReqOpenReq 
+        -> Maybe Options -> Int32 -> TypeDBSession -> UUID -> Opts -> Transaction_Req
+openTx_ txType opts lat (TypeDBSession session_id) txid txopts = toTx txid txopts $ Transaction_ReqReqOpenReq 
        $ Transaction_Open_Req 
-            (toASCIIBytes txid)
+            (session_id)
             (Enumerated $ Right txType)
             opts
             lat

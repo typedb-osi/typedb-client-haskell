@@ -5,7 +5,6 @@
 module Types where
 import Network.GRPC.HighLevel.Generated
 import Data.Text
-import qualified Data.ByteString as BS
 import Control.Monad.Trans.Reader
 import Control.Monad.IO.Class
 import Control.Monad.IO.Unlift
@@ -16,9 +15,11 @@ import Network.GRPC.LowLevel.Call
 import GHC.Int (Int64)
 import qualified Concept
 import qualified Data.Text.Internal.Lazy
+import Data.UUID
+import Data.ByteString
 
 newtype Keyspace = Keyspace { getKeyspace :: Text }
-newtype TypeDBSession = TypeDBSession { getTypeDBSession :: BS.ByteString }
+newtype TypeDBSession = TypeDBSession { getTypeDBSession :: ByteString }
     deriving (Show)
 
 
@@ -36,7 +37,8 @@ newtype TypeDBError = TypeDBError { getError :: Text }
 
 instance Exception TypeDBError
 
-type Callback a b = ClientCall
+type Callback a b = Either GRPCIOError ()
+              -> ClientCall
               -> MetadataMap
               -> StreamRecv a
               -> StreamSend b

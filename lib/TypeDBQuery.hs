@@ -347,7 +347,7 @@ showRelation rel        = "( "
 -- data RolePlay a b = RP { role :: IsaMember a => Maybe a, player :: IsaMember b => b }
 showRolePlay :: (IsaMember a, IsaMember b) => RolePlay a b -> Text
 showRolePlay (RP (Just role) player) = showIsaMember role 
-                                     <> ": " 
+                                     <> ":" 
                                      <> showIsaMember player
 showRolePlay (RP Nothing player)     = showIsaMember player
 

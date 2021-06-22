@@ -24,6 +24,10 @@ import Transaction
 import CoreService
 import Data.Text (Text, pack)
 import Data.Text.Lazy (toStrict, fromStrict)
+import Data.Text.Encoding
+import Data.UUID
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
 import Control.Monad.IO.Class
 import Control.Monad.IO.Unlift
 import UnliftIO.Async
@@ -51,16 +55,18 @@ defaultConfig = ClientConfig { clientServerHost = "localhost"
 defaultTypeDB :: TypeDBConfig 
 defaultTypeDB = TypeDBConfig defaultConfig 3
 
-openSession :: (MonadIO m, MonadConc m) => Keyspace -> TypeDBM m TypeDBSession
-openSession keyspace = 
-    typeDBNormalRequest
-        typeDBSessionOpen
-        (Session_Open_Req db type' opts)
-        (TypeDBSession . session_Open_ResSessionId)
-    where
-        db    = fromStrict $ getKeyspace keyspace
-        type' = Enumerated $ Right $ Session_TypeDATA
-        opts  = Just $ Options { optionsInferOpt = Nothing
+data SessionType = DataSession
+                 | SchemaSession
+            deriving (Show,Eq)
+
+openSessionOfType :: (MonadIO m, MonadConc m) => Keyspace -> SessionType -> TypeDBM m TypeDBSession
+openSessionOfType keyspace sessiontype = openSession_ keyspace sessiontype defaultSessionOpts
+
+openSessionDefault :: (MonadIO m, MonadConc m) => Keyspace -> TypeDBM m TypeDBSession
+openSessionDefault keyspace = openSession_ keyspace DataSession defaultSessionOpts
+
+defaultSessionOpts :: Maybe Options
+defaultSessionOpts = Just $ Options { optionsInferOpt = Nothing
                                , optionsTraceInferenceOpt = Nothing
                                , optionsExplainOpt = Nothing
                                , optionsParallelOpt = Nothing
@@ -70,18 +76,32 @@ openSession keyspace =
                                , optionsSchemaLockAcquireTimeoutOpt = Nothing
                                , optionsReadAnyReplicaOpt = Nothing } 
 
+openSession_ :: (MonadIO m, MonadConc m) => Keyspace -> SessionType -> Maybe Options -> TypeDBM m TypeDBSession
+openSession_ keyspace sessiontype opts = 
+    typeDBNormalRequest
+        typeDBSessionOpen
+        (Session_Open_Req db type' opts)
+        (\sessOpenRes ->
+            TypeDBSession $ session_Open_ResSessionId sessOpenRes)
+    where
+        db    = fromStrict $ getKeyspace keyspace
+        type' = Enumerated $ Right $ 
+                    (case sessiontype of 
+                      DataSession -> Session_TypeDATA
+                      SchemaSession -> Session_TypeSCHEMA)
+
 pulseSession :: (MonadIO m, MonadConc m) => TypeDBSession -> TypeDBM m ()
 pulseSession (TypeDBSession session) =
     typeDBNormalRequest
         typeDBSessionPulse
-        (Session_Pulse_Req session)
+        (Session_Pulse_Req $ {-toASCIIBytes-} session)
         (const ())
 
 closeSession :: (MonadIO m, MonadConc m) => TypeDBSession -> TypeDBM m ()
 closeSession (TypeDBSession session) = 
     typeDBNormalRequest
         typeDBSessionClose
-        (Session_Close_Req session)
+        (Session_Close_Req $ {-toASCIIBytes-} session)
         (const ())
                               {-
 
@@ -125,7 +145,7 @@ getKeyspaces =
 
 
 networkLatency :: GHC.Int.Int32
-networkLatency = 5000
+networkLatency = 15000
 
 
                  
@@ -138,11 +158,11 @@ performTx tx func = do
                     -- TODO: send_res, res may be error
                     print tx
                     print "sending request"
-                    _ <- send $ Transaction_Client $ fromList 
+                    res <- send $ Transaction_Client $ fromList 
                             $ tx
                     --res <- unsafeFromRight <$> receive ::IO (Maybe Transaction_Server)
-                    print "sent"
-                    func clientCall meta receive send done
+                    
+                    func res clientCall meta receive send done
                 )
 
 
@@ -164,6 +184,21 @@ typeDBNormalRequest select req convert = TypeDBM $ do
               _meta1 _meta2 _status _details  -> return $ convert result
             ClientErrorResponse err -> throw $ TypeDBError $ pack $ show err
 
+typeDBNormalRequestErr :: (MonadIO m, Show ex) => 
+    Selector req res -> req -> (res -> Either ex a) -> TypeDBM m a
+typeDBNormalRequestErr select req convert = TypeDBM $ do
+    (TypeDBConfig config timeoutSeconds') <- ask
+    liftIO $ withGRPCClient config $ \client -> do
+        typeDBFunction <- select <$> typeDBClient client
+        res <- typeDBFunction (ClientNormalRequest req timeoutSeconds' [])
+        case res of
+            ClientNormalResponse 
+              result 
+              _meta1 _meta2 _status _details  -> 
+                  case convert result of 
+                    (Left  err) -> throw $ TypeDBError $ pack $ show err
+                    (Right res) -> return res
+            ClientErrorResponse err -> throw $ TypeDBError $ pack $ show err
 
 typeDBNormalRequestE :: MonadIO m => 
     Selector req res -> req -> (res -> a) -> TypeDBM m (Either TypeDBError a)
@@ -231,16 +266,26 @@ data SessionTimeout = SessionTimeout
     deriving Show
 instance Exception SessionTimeout
 
+
+withSchemaSession :: (MonadUnliftIO m, MonadIO m, MonadConc m) 
+            => Keyspace -> (TypeDBSession -> TypeDBM m a) -> TypeDBM m a
+withSchemaSession keyspace m = withSession keyspace SchemaSession m
+
+withDataSession :: (MonadUnliftIO m, MonadIO m, MonadConc m) 
+            => Keyspace -> (TypeDBSession -> TypeDBM m a) -> TypeDBM m a
+withDataSession keyspace m = withSession keyspace DataSession m
+
+
 withSession :: (MonadUnliftIO m, MonadIO m, MonadConc m) 
-            => Keyspace -> TypeDBM m a -> TypeDBM m a
-withSession keyspace m = do
-    session <- openSession keyspace
-    liftIO $ print $ "opened session " <> (getTypeDBSession session)
+            => Keyspace -> SessionType -> (TypeDBSession -> TypeDBM m a) -> TypeDBM m a
+withSession keyspace sessiontype m = do
+    session <- openSessionOfType keyspace sessiontype
+    liftIO $ putStrLn $ "opened session: " <> (show session)
 
     pulseSessionThread <- forkIO $ 
                             catch (sendPulses session)
                                   (\(a::SessionTimeout) -> return ())
-    res <- m
+    res <- m session
     -- waitEitherCancel :: MonadUnliftIO m => Async a 
     --                       -> Async b 
     --                       -> m (Either a b) 
@@ -251,7 +296,8 @@ withSession keyspace m = do
     -}
     throwTo pulseSessionThread SessionTimeout
     closeSession session
-    liftIO $ print $ "closed session " <> (getTypeDBSession session)
+    liftIO $ putStrLn $ "closed session " <> (show session)
+    liftIO $ putStrLn ""
     return res
     {-case res of
       Left _ -> throwM $ TypeDBError "connection to the server severed; session unclosed"
