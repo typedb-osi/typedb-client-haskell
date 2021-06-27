@@ -3,7 +3,7 @@
 , text, vector
 }:
 mkDerivation {
-  pname = "grakn-client";
+  pname = "typedb-client";
   version = "0.0.0.1";
   src = ./.;
   isLibrary = true;
@@ -13,6 +13,6 @@ mkDerivation {
     optparse-generic proto3-suite proto3-wire text vector
   ];
   executableHaskellDepends = [ async base ];
-  description = "GRAKN.ai haskell driver using gRPC-haskell by awakenetworks.";
+  description = "TypeDB Haskell driver using gRPC-haskell by awakenetworks.";
   license = stdenv.lib.licenses.asl20;
 }
