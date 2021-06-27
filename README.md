@@ -17,11 +17,17 @@ To get a development environment use
 ```sh
 > nix-shell
 ```
- Building from within the dev env:
- ```sh
- > cabal build
- ```
- 
+
+Building from within the dev env:
+```sh
+> cabal build
+```
+
+to build the project in one command:
+```sh 
+> nix-shell --command "cabal update && cabal build"
+```
+
  ## Status
 
 the haskell client successfully performed its' first action:
@@ -35,13 +41,9 @@ query DSL compiles to proper query strings
 
 still a long road to go; but nevertheless a small victory ^^
 
- *Beware:* Currently, the core code is messy, there is no testing and there are
+ *Beware:* Currently, the core code is messy, there is not much testing and there are
  still design choices planned that are subject to change if I see fit. 
  Enter at own risk ;)
- 
- ## Developing notes
- you will probably want to `clone --recursive` to get the grpc library;
- this part will be offlodad to the nix build script in time
  
  ## Contributing
  Right now this is a university project of mine. 
