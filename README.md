@@ -12,7 +12,11 @@ There are three versions planned (all within this package):
 - Low-Level-Client: a usable wrapper around the generated gRPC Code.
   
 ## Building
-This project uses Nix.
+This project uses Nix. This is only partly wanted because it strongly restrict interaction
+with the "standard" way of building Haskell using stack/cabal. However, the underlying
+gRPC library needs to be built with nix right now. Once it is possible to build the library
+without nix, building with cabal solely will be possible.
+
 To get a development environment use 
 ```sh
 > nix-shell
@@ -46,11 +50,14 @@ still a long road to go; but nevertheless a small victory ^^
  Enter at own risk ;)
  
  ## Contributing
- Right now this is a university project of mine. 
- A basic client should be the outcome of the project (for my university at least).
  
- If you want to contribute, please reach out via mail, discord or by issue
- or even a pull request if you are very eager.
- (But please don't be disapointed if I take some time to answer/merge pull requests
- because I have loads of different projects to handle right now.)
- 
+ Contributions in form of pull requests and issues are welcome. 
+ If you plan to contribute larger parts, question the design choices or anything
+ of that magnitude (or if you simply want some human contact) please visit the 
+ devleopment channel [on discord in the typedb discord server](https://discord.com/channels/665254494820368395/837321869937213450)
+
+ To get a better overview of the project and the code there are also two diagrams
+ that depict a messageflow and the module architecture and [a report detailing
+ the design decisions made along the way](https://github.com/typedb-osi/typedb-client-haskell/blob/master/report.pdf).
+
+ I will also add a browsable haddock documentation in time.
